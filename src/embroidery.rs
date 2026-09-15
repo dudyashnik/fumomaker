@@ -305,16 +305,8 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
         start_plane_x: f32,
     }
 
-    struct ForgottenStartInfo {
-        which_one_we_were_above: usize,
-        which_x: f32
-        /* Info about the point just above the which_one_we_were_above vertex:
-         (which_x, (graph[which_one_we_were_above].y + 0.5) * line_dist )*/
-    }
-
     struct St {
         in_progress_hopping: Option<HoppingChain>,
-        forgotten_start: Option<ForgottenStartInfo>,
         done_something_significant: bool,
 
         start: Option<Vec2>,
@@ -369,27 +361,6 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
         fn end_hopping_chain(&mut self, graph: &Vec<Vertex>){
             match self.in_progress_hopping.take() {
                 Some(chain) => {
-                    for chain_id in 1..chain.vertices.len() {
-                        if !self.done_something_significant {
-                            if let Some(fs) = &self.forgotten_start {
-                                if match chain.y_dir{
-                                    YDir::Up => { fs.which_one_we_were_above == chain.vertices[chain_id] },
-                                    YDir::Down => { fs.which_one_we_were_above == chain.vertices[chain_id - 1] },
-                                } {
-                                    loop {
-                                        match self.stitches.last().map(|s|{s.kind}) {
-                                            Some(StitchKind::HoppingInDescend) | Some(StitchKind::HoppingToTurnBack) => {self.stitches.pop();  },
-                                            Some(StitchKind::HoppingStartOfJob) | Some(StitchKind::Normal) | Some(StitchKind::NormalBorder) => panic!(),
-                                            _ => break
-                                        }
-                                    }
-                                    self.do_hopping_chain(graph, HoppingChain{y_dir: chain.y_dir,
-                                        start_plane_x: fs.which_x, vertices: chain.vertices[chain_id..].to_vec()  });
-                                    return;
-                                }
-                            }
-                        }
-                    }
                     self.do_hopping_chain(graph, chain);
                 }
                 _ => {}
@@ -509,7 +480,7 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
         }
     }
 
-    let mut st = St {forgotten_start: None, done_something_significant: false,
+    let mut st = St {done_something_significant: false,
         in_progress_hopping: None,
         start: None, stitches: Vec::new(), hopping_stitch_len, params,
         a: stitching_trenches.a, b: stitching_trenches.b};
@@ -530,25 +501,11 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
             }).map(|(vid, v, p): (usize, &Vertex, f32)| -> (usize, &Vertex, f32, f32){
                 (vid, v, p, (st.to_screen(p, (v.my_y as f32 + 0.5) * st.params.fill_line_dist) - old_end).length())
             }).min_by(|(_, _, _, d1), (_, _, _, d2)|{ d1.partial_cmp(d2).unwrap() }).unwrap();
-
             st.start = Some(old_end);
-            st.forgotten_start = Some(ForgottenStartInfo{which_one_we_were_above: closest_vert_id, which_x: closest_v_x});
             st.push_segment_stitch(old_end,
                                    st.to_screen(closest_v_x, (closest_vert.my_y as f32 + 0.5) * st.params.fill_line_dist),
                                    StitchKind::TransLevel, st.hopping_stitch_len);
-            st.in_progress_hopping = Some(HoppingChain{y_dir: YDir::Down, vertices: Vec::new(),
-                start_plane_x: closest_v_x});
-            let mut cur_v = closest_vert_id;
-            loop {
-                match graph[cur_v].neighbours[0].first() {
-                    None => break,
-                    Some(&lv) => {
-                        st.in_progress_hopping.as_mut().unwrap().vertices.push(cur_v);
-                        cur_v = lv;
-                    }
-                }
-            }
-            cur_v
+            closest_vert_id
         }
     };
     dfs(start_v, None,YDir::Up, StitchDir::Right, &mut graph, &mut st);
