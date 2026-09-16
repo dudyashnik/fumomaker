@@ -22,6 +22,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::f32::consts::PI;
 use std::time::Instant;
+use enum_as_inner::EnumAsInner;
 
 use util::*;
 use scene::*;
@@ -194,6 +195,7 @@ impl Scene {
     }
 }
 
+#[derive(EnumAsInner)]
 enum EditorMode {
     // In which we draw shapes
     Draw,
@@ -213,8 +215,10 @@ enum EditorDrawingTool{
 struct Editor {
     scene: Scene,
     cam: Camera,
-    selected_color: Option<usize>,
     mode: EditorMode,
+    // `stitches` will be shown only in Stitch mode
+    stitches: Option<EmbroideryImage>,
+    selected_color: Option<usize>,
     selected_tool: EditorDrawingTool,
     selected_shape: Option<usize>,
     selected_movement: Option<usize>,
@@ -227,8 +231,9 @@ struct Editor {
 impl Editor{
     fn new(scene: Scene) -> Editor {
         Editor {scene, cam: Camera {top_left: Vec2::new(-50.0, 50.0), px_in_mm: 33.0},
-            selected_color: None,
             mode: EditorMode::Draw,
+            stitches: None,
+            selected_color: None,
             selected_tool: EditorDrawingTool::Area,
             selected_shape: None,
             selected_movement: None,
@@ -242,6 +247,7 @@ impl Editor{
 
 #[macroquad::main("Texture")]
 async fn main() {
+    println!("1123123123");
     let args: Vec<String> = args().collect();
     if args.len() != 2 {
         println!("Usage: fumomaker <scene_file.fm_scene>");
@@ -377,28 +383,57 @@ async fn main() {
         }
         for (&gid, group) in &scene.area_groups {
             let color = scene.colors[&scene.get_object_attrs(&scene.objects[&group.perimeters.first().unwrap()].obj).color].clr;
-            match editor.mode {
-                EditorMode::Draw => {
-                    for obj in group.perimeters.iter().map(|pid| -> &ObjectNode {&scene.objects[pid].obj} ) {
-                        let (source, trans): (&AreaShape, Option<MovementNode>) = match obj {
-                            ObjectNode::RealObjectNode(real) => (real.att.shape.as_area_shape().unwrap(), None),
-                            ObjectNode::GhostObject(ghost) => (
-                                scene.objects[&ghost.source].obj.as_real_object_node().unwrap().att.shape.as_area_shape().unwrap(),
-                                Some(scene.movements[&ghost.movement])
-                            )
-                        };
-                        for i in 0..source.points.len() {
-                            let ni = if i + 1 == source.points.len() { 0 } else {i + 1};
-                            let a = MovementNode::option_forward(trans, source.points[i]);
-                            let b = MovementNode::option_forward(trans, source.points[ni]);
-                            editor.cam.draw_mq_line_on_scene(a, b, 4., vec3_to_mq_color(color));
+            if editor.mode.is_draw() || editor.mode.is_stitch() {
+                for obj in group.perimeters.iter().map(|pid| -> &ObjectNode {&scene.objects[pid].obj} ) {
+                    let (source, trans): (&AreaShape, Option<MovementNode>) = match obj {
+                        ObjectNode::RealObjectNode(real) => (real.att.shape.as_area_shape().unwrap(), None),
+                        ObjectNode::GhostObject(ghost) => (
+                            scene.objects[&ghost.source].obj.as_real_object_node().unwrap().att.shape.as_area_shape().unwrap(),
+                            Some(scene.movements[&ghost.movement])
+                        )
+                    };
+                    for i in 0..source.points.len() {
+                        let ni = if i + 1 == source.points.len() { 0 } else {i + 1};
+                        let a = MovementNode::option_forward(trans, source.points[i]);
+                        let b = MovementNode::option_forward(trans, source.points[ni]);
+                        editor.cam.draw_mq_line_on_scene(a, b, 4., vec3_to_mq_color(color));
+                    }
+                }
+            }
+            if editor.mode.is_embroidery() {
+                let (hidden, primary) = get_two_trench_zones(
+                    &editor.scene, &group.perimeters, group.control_center_pos, group.control_fill_dir_offset, group.f_params);
+                for (trench, thickness, alpha) in [(hidden, 3., 0.35), (primary, 5., 0.67)] {
+                    for (yi, line) in trench.lines.iter().enumerate() {
+                        for seg in line {
+                            let a = trench.b + trench.a * vec2(seg.start, yi as f32 * trench.dist);
+                            let b = trench.b + trench.a * vec2(seg.end, yi as f32 * trench.dist);
+                            editor.cam.draw_mq_line_on_scene(a, b, thickness, Color::new(0., 0., 0., alpha));
                         }
                     }
                 }
-                EditorMode::Embroidery => {
-                    // let trench_1 =
+            }
+        }
+
+        if editor.mode.is_stitch() {
+            let compiled: &EmbroideryImage = editor.stitches.as_ref().unwrap();
+            for color_grp in &compiled.grp {
+                let color = &editor.scene.colors[&color_grp.color];
+                for path in &color_grp.paths {
+                    editor.cam.draw_smol_circle(path.start, 7., vec3_to_mq_color(color.clr), 2., BLUE);
+                    let mut prev = path.start;
+                    for stitch in &path.stitches {
+                        editor.cam.draw_arrow(prev, stitch.end, 2., match stitch.kind {
+                            StitchKind::Normal => BLUE,
+                            StitchKind::NormalBorder => Color::new(0.7, 0.7, 1., 1.),
+                            StitchKind::HoppingInDescend => RED,
+                            StitchKind::HoppingToTurnBack => Color::new(0.8, 0.2, 0.8, 1.),
+                            StitchKind::HoppingStartOfJob => Color::new(1., 0.7, 0.7, 1.),
+                            StitchKind::TransLevel => GREEN,
+                        });
+                        prev = stitch.end;
+                    }
                 }
-                _ => panic!()
             }
         }
     };
@@ -542,9 +577,11 @@ async fn main() {
         draw_node_list(&editor);
 
         if is_key_pressed(KeyCode::E){
+            editor.stitches = None;
             editor.mode = EditorMode::Embroidery;
         }
         if is_key_pressed(KeyCode::M){
+            editor.stitches = None;
             editor.mode = EditorMode::Draw;
         }
 

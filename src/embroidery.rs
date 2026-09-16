@@ -8,8 +8,8 @@ use super::util::*;
 // From drawing mode to embroidery configuration mode
 
 pub struct StitchingSegment {
-    start: f32,
-    end: f32,
+    pub start: f32,
+    pub end: f32,
 }
 
 pub struct TrenchZone {
@@ -20,12 +20,12 @@ pub struct TrenchZone {
 }
 
 impl TrenchZone {
-    fn to_scene(&self, x: f32, y: u32) -> Vec2 {
+    pub fn to_scene(&self, x: f32, y: u32) -> Vec2 {
         self.b + self.a * vec2(x, y as f32 * self.dist)
     }
 }
 
-fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_pos: Vec2, dir: Vec2, params: AreaFillParams) -> TrenchZone {
+pub fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_pos: Vec2, dir: Vec2, params: AreaFillParams) -> TrenchZone {
     let dir = dir.normalize();
     struct Fixed {
         points: Vec<IVec2>,
@@ -112,7 +112,7 @@ fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_pos: 
     let mut opened_sgegs: HashSet<usize> = HashSet::new();
     for my_y in (yy_start..top).step_by(trench_gap as usize){
         while let Some(nxt_change) = changes.get(cur_change) && nxt_change.y <= my_y {
-            if (nxt_change.is_end){
+            if nxt_change.is_end {
                 opened_sgegs.remove(&nxt_change.sgeg_id);
             } else {
                 opened_sgegs.insert(nxt_change.sgeg_id);
@@ -163,6 +163,16 @@ fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_pos: 
         assert_eq!(is_inside, 0);
         trenches.push(segments);
     }
+
+    // Useless check
+    while let Some(nxt_change) = changes.get(cur_change) {
+        if nxt_change.is_end {
+            opened_sgegs.remove(&nxt_change.sgeg_id);
+        } else {
+            opened_sgegs.insert(nxt_change.sgeg_id);
+        }
+        cur_change += 1;
+    }
     assert!(opened_sgegs.is_empty());
 
 
@@ -171,7 +181,7 @@ fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_pos: 
 }
 
 
-fn get_two_trench_zones(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_pos: Vec2, dir: Vec2, params: AreaDoubleFillParams) -> (TrenchZone, TrenchZone) {
+pub fn get_two_trench_zones(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_pos: Vec2, dir: Vec2, params: AreaDoubleFillParams) -> (TrenchZone, TrenchZone) {
     (
         get_one_trench_zone(scene, perimeters, anchor_pos, -vec2(-dir.y, dir.x), params.hidden_fill),
         get_one_trench_zone(scene, perimeters, anchor_pos, dir, params.primal_fill),
@@ -476,6 +486,8 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
 
         for u in before_parent {
             // We place the hopping path here ( definitely a new one)
+            st.end_hopping_chain(graph);
+            st.start_hopping_chain(&graph[u], dir_back);
             dfs(u, Some(v), dir_back, x_dir.opposite(), graph, st);
         }
     }
