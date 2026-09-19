@@ -174,43 +174,46 @@ impl Camera {
 
     pub fn draw_dash_line_on_screen(sa: Vec2, sb: Vec2, px_offset: f32, thickness: f32,
                                     worm_length: f32, worm_tail_dist: f32, color: Color){
-        let l_full = (-sa+sb).length();
-        let mut a = ((sa.x as f64 * 256.0).round() as i64, (sa.y as f64 * 256.0).round() as i64);
-        let mut b = ((sb.x as f64 * 256.0).round() as i64, (sb.y as f64 * 256.0).round() as i64);
-        let mut w = (screen_width() as f64 * 256.0).round() as i64;
-        let mut h = (screen_height() as f64 * 256.0).round() as i64;
+        let l_full = (sb - sa).length();
+        if l_full == 0. || worm_length <= 0. || worm_tail_dist <= 0. {
+            return
+        }
+
+        let direction = (sb - sa) / l_full;
+        const CLIP_MARGIN: f32 = 10.;
 
         let mut l_start: f32 = 0.;
         let mut l_end: f32 = l_full;
 
-        if a.0 < b.0 {
-            l_start = f32::max(l_start, -10.0 + ((0 - a.0) as f64 / 256.) as f32);
-            l_end = f32::min(l_end, 10. + ((w - a.0) as f64 / 256.) as f32);
-        } else if b.0 < a.0 {
-            l_start = f32::max(l_start, -10.0 + (((-w + a.0) as f64 / 256.) as f32));
-            l_end = f32::min(l_end, 10. + (((-0 + a.0) as f64 / 256.) as f32));
-        } else if a.1 < -1000 || a.1 > h + 1000 {
-            l_end = -1.;
-        }
+        for (start, delta, limit) in [
+            (sa.x, direction.x, screen_width()),
+            (sa.y, direction.y, screen_height()),
+        ] {
+            if delta.abs() < f32::EPSILON {
+                if start < -CLIP_MARGIN || start > limit + CLIP_MARGIN {
+                    return
+                }
+                continue
+            }
 
-        if a.1 < b.1 {
-            l_start = f32::max(l_start, -10.0 + ((0 - a.1) as f64 / 256.) as f32);
-            l_end = f32::min(l_end, 10. + ((h - a.1) as f64 / 256.) as f32);
-        } else if b.1 < a.1 {
-            l_start = f32::max(l_start, -10.0 + (((-h + a.1) as f64 / 256.) as f32));
-            l_end = f32::min(l_end, 10. + (((-0 + a.1) as f64 / 256.) as f32));
-        } else if a.0 < -1000 || a.0 > w + 1000 {
-            l_end = -1.;
+            let d1 = (-CLIP_MARGIN - start) / delta;
+            let d2 = (limit + CLIP_MARGIN - start) / delta;
+            l_start = l_start.max(d1.min(d2));
+            l_end = l_end.min(d1.max(d2));
         }
 
         if l_start > l_end { return }
 
-        let mut cur: f32 = - px_offset + ((px_offset + l_start) / worm_length).floor() * worm_length;
+        let first_worm = ((l_start + px_offset - worm_length) / worm_tail_dist).ceil();
+        let mut cur = first_worm * worm_tail_dist - px_offset;
         while cur < l_end {
-            let cur_end = cur + worm_length;
-            let w1 = sa + (sb - sa).normalize() * cur;
-            let w2 = sa + (sb - sa).normalize() * cur_end;
-            draw_line(w1.x, w1.y, w2.x, w2.y, thickness, color);
+            let cur_start = cur.max(l_start);
+            let cur_end = (cur + worm_length).min(l_end);
+            if cur_start < cur_end {
+                let w1 = sa + direction * cur_start;
+                let w2 = sa + direction * cur_end;
+                draw_line(w1.x, w1.y, w2.x, w2.y, thickness, color);
+            }
             cur += worm_tail_dist;
         }
     }
@@ -223,4 +226,3 @@ impl Camera {
             px_offset, thickness, worm_length, worm_tail_dist, color);
     }
 }
-
