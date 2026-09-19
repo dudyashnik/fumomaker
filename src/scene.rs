@@ -10,7 +10,7 @@ pub struct SymmetryMovement{
     pub pos_y2: f32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(EnumAsInner, Clone, Copy)]
 pub enum MovementNode{
     SymmetryMovement(SymmetryMovement),
 }

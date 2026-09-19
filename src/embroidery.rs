@@ -103,8 +103,8 @@ pub fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_p
     let bottom = changes.first().unwrap().y;
     let top = changes.last().unwrap().y;
     let trench_gap: i32 = i32::max(to_discrete(params.fill_line_dist), 1);
-    let yy_known = to_discrete((scene_to_me * anchor_pos).y) + trench_gap / 2 - bottom;
-    let yy_start = yy_known - yy_known.div_floor(trench_gap) * trench_gap;
+    let yy_known = to_discrete((scene_to_me * anchor_pos).y) + trench_gap / 2;
+    let yy_start = yy_known + (-yy_known + bottom).div_ceil(trench_gap) * trench_gap;
 
 
     let mut trenches: Vec<Vec<StitchingSegment>> = Vec::new();
@@ -137,13 +137,13 @@ pub fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_p
 
         let mut activated_areas: Vec<bool> = Vec::new();
         activated_areas.resize(fixed.len(), false);
-        let is_inside = 0i32;
+        let mut is_inside = 0i32;
 
         let mut last_opened: Option<i64> = None;
         let mut segments: Vec<StitchingSegment> = Vec::new();
         for hor_ch in horizontal_changes {
             let area: &Fixed = &fixed[hor_ch.fixed_area_id];
-            let is_inside = is_inside +
+            is_inside = is_inside +
                 (if activated_areas[hor_ch.fixed_area_id] { -1i32 } else { 1i32 }) *
                 (if area.is_gap { -1i32 } else { 1i32 });
             match last_opened {
@@ -151,7 +151,7 @@ pub fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_p
                     last_opened = Some(hor_ch.x)
                 },
                 Some(start_x) if is_inside <= 0 => {
-                    segments.push(StitchingSegment {start: start_x as f32, end: hor_ch.x as f32});
+                    segments.push(StitchingSegment {start: to_floating(start_x), end: to_floating(hor_ch.x)});
                     last_opened = None;
                 }
                 _ => {}

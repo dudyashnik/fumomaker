@@ -1,5 +1,9 @@
-use macroquad::prelude::glam;
-use glam::*;
+use macroquad::prelude::glam::*;
+use std::collections::BTreeMap;
+
+pub fn btreemap_usize_get_unused_id<T>(map: &BTreeMap<usize, T>) -> usize{
+    map.last_key_value().map(|(&k, _)|{k + 1}).unwrap_or(0)
+}
 
 pub fn get_rot_mat(a: f32) -> Mat2 {
     mat2(vec2(a.cos(), a.sin()), vec2(-a.sin(), a.cos()))
