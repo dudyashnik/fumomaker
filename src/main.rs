@@ -79,7 +79,7 @@ async fn main() {
     editor.selected_color = Some(1);
     editor.scene.movements.insert(0, MovementNode::SymmetryMovement(SymmetryMovement{x: 110.0, pos_y1: 2.0, pos_y2: 30.0}));
     editor.scene.movements.insert(1, MovementNode::SymmetryMovement(SymmetryMovement{x: -110.0, pos_y1: 2.0, pos_y2: 30.0}));
-    editor.selected_movement = Some(0);
+    editor.selected = Selection::Movement(0);
     editor.scene.objects.insert(0, GroupedObjectNode{obj: ObjectNode::GhostObject(GhostObject{movement: 1, source: 1 }), group: Some(0)});
     editor.scene.objects.insert(1, GroupedObjectNode{obj: ObjectNode::RealObjectNode(
         RealObjectNode{att: RealObjectAttrs{shape: Shape::AreaShape(AreaShape{
@@ -103,222 +103,109 @@ async fn main() {
     prevent_quit();
     let t_start = Instant::now();
     let mut t_previous = t_start;
-    let mut t_started_moving: Option<Instant> = None;
     loop {
         let t_now = Instant::now();
         clear_background(vec3_to_mq_color(editor.scene.get_bg_color()));
         editor.draw_grid(&font);
-        editor.draw_scene();
+        editor.draw_scene((t_now - t_start).as_secs_f32());
         editor.draw_info_label(&font, &embroidery_file_name);
         editor.draw_color_list(&font);
         editor.draw_node_list(&font);
 
-        if is_mouse_button_pressed(MouseButton::Left){
-            (|| {
-                if editor.mode.is_embroidery(){
-                    for (&group_id, group) in &editor.scene.area_groups {
-                        let (a, b) = editor.get_area_group_control_arrow_scr_pos(group);
-                        if is_mouse_near_dot(a) {
-                            editor.held_arrow_start_embroidery_control_group = Some(group_id);
-                            return;
-                        }
-                        if is_mouse_near_dot(b) {
-                            editor.held_arrow_end_embroidery_control_group = Some(group_id);
-                            return;
-                        }
-                    }
-                } else if editor.mode.is_draw() {
-                    let p = editor.cam.get_mouse_scene_pos();
-                    match editor.selected_tool {
-                        EditorDrawingTool::Symmetry => {
-                            if editor.held_edited_sym.is_some(){
-                                editor.held_edited_sym = None;
-                            } else {
-                                let id = btreemap_usize_get_unused_id(&editor.scene.movements);
-                                editor.scene.movements.insert(id, MovementNode::SymmetryMovement(SymmetryMovement{
-                                    x: p.x, pos_y1: p.y, pos_y2: p.y
-                                }));
-                                editor.held_edited_sym = Some(id);
+        if is_mouse_button_pressed(MouseButton::Left) && is_no_mod_down(){
+            editor.command_embroidery_config_control_click_normal();
+        }
 
-                            }
-                        }
-                        EditorDrawingTool::Area => {
-                            if let Some(cur_edited_id) = editor.held_edited_perimeter {
-                                let first = *editor.get_points_mut_of_area(cur_edited_id).first().unwrap();
-                                if editor.cam.is_mouse_near_scene_dot(first) {
-                                    editor.get_points_mut_of_area(cur_edited_id).pop();
-                                    editor.held_edited_perimeter = None;
-                                } else {
-                                    let last = *editor.get_points_mut_of_area(cur_edited_id).last().unwrap();
-                                    editor.get_points_mut_of_area(cur_edited_id).push(last);
-                                }
-                            } else {
-                                let working_color_id = match editor.selected_color { Some(x) => x, None => return };
-                                let is_gap = is_shift();
-                                let id = btreemap_usize_get_unused_id(&editor.scene.objects);
-                                let new_group_id = btreemap_usize_get_unused_id(&editor.scene.area_groups);
-                                editor.scene.area_groups.insert(new_group_id, AreaShapeGroup{
-                                    control_center_pos: p, control_fill_dir_offset: vec2(1., 0.),
-                                    f_params : AreaDoubleFillParams::default(),
-                                    perimeters: BTreeSet::from([id])
-                                });
-                                editor.scene.objects.insert(id, GroupedObjectNode{
-                                    obj: ObjectNode::RealObjectNode(RealObjectNode{
-                                        att: RealObjectAttrs{ shape: Shape::AreaShape(AreaShape {
-                                            points: vec![p, p], is_gap
-                                        }), color: working_color_id },
-                                        clone: None
-                                    }), group: Some(new_group_id)});
-                                editor.held_edited_perimeter = Some(id);
-                            }
-                        }
-                        EditorDrawingTool::ThinLine => {
-                            if let Some(edited_line_id) = editor.held_edited_thin_line {
-                                let last = *editor.get_points_mut_of_thin_line(edited_line_id).last().unwrap();
-                                editor.get_points_mut_of_thin_line(edited_line_id).push(last);
-                            } else {
-                                let working_color_id = match editor.selected_color { Some(x) => x, None => return };
-                                let id = btreemap_usize_get_unused_id(&editor.scene.objects);
-                                editor.scene.objects.insert(id, GroupedObjectNode {group: None,
-                                    obj: ObjectNode::RealObjectNode(RealObjectNode {clone: None,
-                                        att: RealObjectAttrs {
-                                            shape: Shape::LineShape(LineShape{points: vec![p, p]}),
-                                            color: working_color_id }
-                                    })});
-                                editor.held_edited_thin_line = Some(id);
-                            }
-                        }
-                        EditorDrawingTool::ThickLine => {
-                            if let Some(edited_line_id) = editor.held_edited_thick_line {
-                                let last = *editor.get_points_mut_of_thick_line(edited_line_id).last().unwrap();
-                                editor.get_points_mut_of_thick_line(edited_line_id).push(last);
-                            } else {
-                                let working_color_id = match editor.selected_color { Some(x) => x, None => return };
-                                let id = btreemap_usize_get_unused_id(&editor.scene.objects);
-                                editor.scene.objects.insert(id, GroupedObjectNode {group: None,
-                                    obj: ObjectNode::RealObjectNode(RealObjectNode {clone: None,
-                                        att: RealObjectAttrs {
-                                            shape: Shape::ThickLineShape(ThickLineShape{
-                                                thickness: 2., points: vec![p, p], prolonged_tips: false
-                                            }),
-                                            color: working_color_id }
-                                    })});
-                                editor.held_edited_thick_line = Some(id);
-                            }
-                        }
-                    }
-                }
-            })();
+        if is_mouse_button_pressed(MouseButton::Left) && is_no_mod_down() {
+            editor.command_drawing_mode_click_normal();
+        }
+
+        if is_mouse_button_pressed(MouseButton::Left) && is_shift() {
+            editor.command_drawing_mode_click_negative();
         }
 
         if is_mouse_button_released(MouseButton::Left) {
-            editor.held_arrow_start_embroidery_control_group = None;
-            editor.held_arrow_end_embroidery_control_group = None;
+            editor.command_embroidery_config_control_pointer_btn_release();
         }
 
-        if let Some(group) = editor.held_arrow_start_embroidery_control_group {
-            editor.scene.area_groups.get_mut(&group).unwrap().control_center_pos = editor.cam.screen_coord_to_scene(get_mouse_position_vec2());
+        if is_mouse_button_pressed(MouseButton::Right) && is_no_mod_down(){
+            editor.command_drawing_mode_selection_click();
         }
 
-        if let Some(group_id) = editor.held_arrow_end_embroidery_control_group {
-            let group: &mut AreaShapeGroup = editor.scene.area_groups.get_mut(&group_id).unwrap();
-            let a = editor.cam.scene_coord_to_screen(group.control_center_pos);
-            group.control_fill_dir_offset = (get_mouse_position_vec2() - a).normalize();
-        }
-
-        if let Some(mov_id) = editor.held_edited_sym {
-            let x = editor.scene.movements.get_mut(&mov_id).unwrap();
-            x.as_symmetry_movement_mut().unwrap().pos_y2 = editor.cam.get_mouse_scene_pos().y;
-        }
-
-        if let Some(area_id) = editor.held_edited_perimeter {
-            let p = editor.cam.get_mouse_scene_pos();
-            *editor.get_points_mut_of_area(area_id).last_mut().unwrap() = p;
-        }
-
-        if let Some(thin_line_id) = editor.held_edited_thin_line {
-            let p = editor.cam.get_mouse_scene_pos();
-            *editor.get_points_mut_of_thin_line(thin_line_id).last_mut().unwrap() = p;
-        }
-
-        if let Some(thick_line_id) = editor.held_edited_thick_line {
-            let p = editor.cam.get_mouse_scene_pos();
-            *editor.get_points_mut_of_thick_line(thick_line_id).last_mut().unwrap() = p;
-        }
+        editor.command_ack_pointer_motion();
 
         if is_pressed_with_no_mod(KeyCode::Escape){
-            if let Some(area_id) = editor.held_edited_perimeter {
-                editor.delete_the_object(area_id, false);
-            } else if let Some(id) = editor.held_edited_thin_line {
-                editor.delete_the_object(id, false);
-            } else if let Some(id) = editor.held_edited_thick_line {
-                editor.delete_the_object(id, false);
-            }
+            editor.command_cancellation();
         }
 
         if is_pressed_with_no_mod(KeyCode::Z) {
-            editor.finish_drawing_progress();
+            editor.command_finish_drawing_progress();
         }
 
         if is_pressed_with_no_mod(KeyCode::E){
-            editor.stitches = None;
-            editor.mode = EditorMode::Embroidery;
+            editor.command_set_editor_mode_embroidery_config();
         }
-        if is_pressed_with_no_mod(KeyCode::M){
-            editor.stitches = None;
-            editor.mode = EditorMode::Draw;
+        if is_pressed_with_no_mod(KeyCode::N){
+            editor.command_set_editor_mode_drawing();
         }
         if is_pressed_with_shift(KeyCode::C) {
-            // todo: do embroidery shit
+            editor.command_set_editor_mode_stitch_image_viewing();
         }
         if is_pressed_with_no_mod(KeyCode::Escape) && editor.mode.is_stitch() {
             editor.stitches = None;
             editor.mode = EditorMode::Embroidery;
         }
         if is_pressed_with_no_mod(KeyCode::Key1){
-            editor.change_tool(EditorDrawingTool::Area);
+            editor.command_change_tool_to_area();
         }
         if is_pressed_with_no_mod(KeyCode::Key2){
-            editor.selected_tool = EditorDrawingTool::ThinLine;
+            editor.command_change_tool_to_thin_line();
         }
         if is_pressed_with_no_mod(KeyCode::Key3){
-            editor.selected_tool = EditorDrawingTool::ThickLine;
+            editor.command_change_tool_to_thick_line();
         }
         if is_pressed_with_no_mod(KeyCode::Key4){
-            editor.selected_tool = EditorDrawingTool::Symmetry;
+            editor.command_change_tool_to_sym();
+        }
+        if is_pressed_with_no_mod(KeyCode::P){
+            editor.perform_select_shape_for_reparenting()
+        }
+        if is_pressed_with_no_mod(KeyCode::H){
+            editor.perform_selected_selected_for_movement_bind();
+        }
+        if is_pressed_with_no_mod(KeyCode::G) {
+            editor.perform_attaching_shape_to_group();
+        }
+        if is_pressed_with_no_mod(KeyCode::O){
+            editor.command_put_object_in_its_own_area_group();
+        }
+        if is_pressed_with_no_mod(KeyCode::M){
+            editor.command_create_a_ghost_object();
         }
 
-        if mouse_wheel().1 != 0. {
-            let s = 1.15f32.powf(mouse_wheel().1);
-            let pointing = editor.cam.screen_coord_to_scene(get_mouse_position_vec2());
-            editor.cam.top_left = pointing + (-pointing + editor.cam.top_left) / s;
-            editor.cam.px_in_mm = editor.cam.px_in_mm * s;
+        if is_pressed_with_alt(KeyCode::Up){
+            editor.command_select_previous_color();
         }
-        if is_no_mod_down() {
-            let cam_movement_keys: &[KeyCode] = &[KeyCode::W, KeyCode::A, KeyCode::S, KeyCode::D];
-            if t_started_moving.is_none() && cam_movement_keys.iter().any(|&k| {is_key_down(k)}) {
-                t_started_moving = Some(t_now);
-            } else if (t_started_moving.is_some() && cam_movement_keys.iter().all(|&k|{!is_key_down(k)})){
-                t_started_moving = None;
-            }
-            if let Some(i_started_moving) = t_started_moving {
-                let cam_pix_per_second = 800.0 + f32::min(0.5, (t_now - i_started_moving).as_secs_f32()) * 1000.;
-                let delta = cam_pix_per_second / editor.cam.px_in_mm * (t_now - t_previous).as_secs_f32();
+        if is_pressed_with_alt(KeyCode::Down){
+            editor.command_select_next_color();
+        }
 
-                if is_key_down(KeyCode::W){
-                    editor.cam.top_left.y += delta;
-                }
-                if is_key_down(KeyCode::A){
-                    editor.cam.top_left.x -= delta;
-                }
-                if is_key_down(KeyCode::S){
-                    editor.cam.top_left.y -= delta;
-                }
-                if is_key_down(KeyCode::D){
-                    editor.cam.top_left.x += delta;
-                }
-            }
+        if is_pressed_with_no_mod(KeyCode::Delete) {
+            editor.command_delete_selected();
         }
+        if is_pressed_with_shift(KeyCode::Delete){
+            editor.command_delete_selected_suppress_ghost_recoil();
+        }
+
+        editor.command_ack_pointer_motion();
+        editor.command_ack_mouse_wheel_motion();
+
+        if is_no_mod_down(){
+            editor.command_ack_pressed_motion_keys(t_previous, t_now,
+                                                   is_key_down(KeyCode::W), is_key_down(KeyCode::A),
+                                                   is_key_down(KeyCode::S), is_key_down(KeyCode::D));
+        }
+
         if is_quit_requested(){
             // todo: save
             break;

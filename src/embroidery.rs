@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 pub use super::scene::*;
 use std::collections::{BTreeSet, BTreeMap, HashSet, HashMap};
 use std::iter::{IntoIterator, Iterator};
+use enum_as_inner::EnumAsInner;
 use crate::embroidery::StitchKind::HoppingInDescend;
 use super::util::*;
 
@@ -45,12 +46,10 @@ pub fn get_one_trench_zone(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_p
     let scene_to_me = mat2(vec2(dir.y, dir.x), vec2(-dir.x, dir.y));
     let me_to_scene_rot = mat2(vec2(dir.y, -dir.x), vec2(dir.x, dir.y));
     let mut fixed: Vec<Fixed> = perimeters.iter().map(| perim_id: &usize| -> Option<Fixed> {
-        let (source, trans): (&AreaShape, Option<MovementNode>) = match &scene.objects[perim_id].obj {
-            ObjectNode::RealObjectNode(real) => (real.att.shape.as_area_shape().unwrap(), None),
-            ObjectNode::GhostObject(ghost) => (
-                scene.objects[&ghost.source].obj.as_real_object_node().unwrap().att.shape.as_area_shape().unwrap(),
-                Some(scene.movements[&ghost.movement])
-            )
+        let (source, trans): (&AreaShape, Option<MovementNode>) = {
+            let (source_attrs, trans) = scene.get_source_and_transition_of_object_node(
+                &scene.objects[perim_id].obj);
+            (source_attrs.shape.as_area_shape().unwrap(), trans)
         };
         if source.points.len() < 3 { return None }
         let mut points: Vec<IVec2> = Vec::new();
@@ -190,7 +189,7 @@ pub fn get_two_trench_zones(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_
 
 // From embroidery configuration mode to stitch display mode
 
-#[derive(Clone, Copy)]
+#[derive(EnumAsInner, Clone, Copy, Eq, PartialEq)]
 pub enum StitchKind { Normal, NormalBorder, HoppingInDescend, HoppingToTurnBack, HoppingStartOfJob, TransLevel }
 
 pub struct Stitch {
@@ -204,7 +203,7 @@ pub struct StitchPath {
 }
 
 pub struct StitchColorGroup {
-    pub color: usize,
+    pub color: UsedColor,
     pub paths: Vec<StitchPath>
 }
 
@@ -526,4 +525,99 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
     assert!(st.stitches.len() > 0);
     res = Some(StitchPath {start: st.start.unwrap(), stitches: st.stitches});
     res
+}
+
+impl StitchPath {
+    fn from_normal_slice(points: &[Vec2]) -> Self{
+        StitchPath {start: *points.first().unwrap(), stitches: points[1..].iter()
+            .map(|&p|{Stitch{end: p, kind: StitchKind::Normal}}).collect()}
+    }
+}
+
+pub fn stitch_path_for_thin_line(line: &LineShape) -> StitchPath {
+    StitchPath::from_normal_slice(&line.points)
+}
+
+pub fn stitch_path_for_thick_line(line: &ThickLineShape) -> StitchPath {
+    let d = line.thickness / 2.;
+    let mut stitches: Vec<Stitch> = Vec::new();
+    let get_to_the_left = |a: Vec2, b: Vec2, l: f32| -> Vec2 {
+        let dir = (-a + b).normalize();
+        let full_l = (-a + b).length();
+        let left = vec2(-dir.y, dir.x);
+        left * (if l < 0. { 1. - (-l) / d } else if l > full_l {1. - (l - full_l) / d } else { 1. })
+    };
+    let mut points: Vec<Vec2> = Vec::new();
+    let mut w = if line.prolonged_tips { -d } else { 0. };
+    for i in 1..line.points.len() {
+        let b: Vec2 = line.points[i - 1];
+        let c: Vec2 = line.points[i];
+        let end = (c - b).length() + if line.prolonged_tips && i == line.points.len() - 1 { d } else { 0. };
+        while w < end{
+            let left = get_to_the_left(b, c, w);
+            points.push(b - left);
+            points.push(b + left);
+            w += line.cross_dist;
+        }
+        w -= (c - b).length();
+    }
+    StitchPath::from_normal_slice(&points)
+}
+
+pub fn stitch_path_for_area_shapes(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_pos: Vec2, dir: Vec2, params: AreaDoubleFillParams) -> Option<StitchPath>{
+    let (hidden_trench, primary_trench) = get_two_trench_zones(scene, perimeters, anchor_pos, dir, params);
+    let mut res = None;
+    let path_1_opt = fill_trench_zone(&hidden_trench, params.hopping_stitch_len,
+                                  AreaFillParams { fill_line_dist: hidden_trench.dist, ..params.hidden_fill }, None);
+    res = path_1_opt;
+    let path_2_opt = fill_trench_zone(&primary_trench, params.hopping_stitch_len,
+                                  AreaFillParams { fill_line_dist: primary_trench.dist, ..params.primal_fill },
+                                  res.as_ref().map(|p|{ p.stitches.last().unwrap().end }));
+    if let Some(mut path_2) = path_2_opt {
+        if let Some(before) = &mut res{
+            before.stitches.append(&mut path_2.stitches)
+        } else {
+            res = Some(path_2)
+        }
+    }
+
+    if let Some(path) = &mut res {
+        path.stitches.drain(..(
+            path.stitches.iter().position(|stitch|{
+                stitch.kind != StitchKind::HoppingInDescend
+            } ).unwrap_or(path.stitches.len())
+        ));
+    }
+    res
+}
+
+pub fn build_embroidery_image(scene: &Scene) -> EmbroideryImage {
+    let mut color_list: Vec<StitchColorGroup> = Vec::new();
+    for (&color_id, color) in &scene.colors {
+        let mut paths: Vec<StitchPath> = Vec::new();
+        for (&obj_id, g_obj) in &scene.objects{
+            let (source, trans) = scene.get_source_and_transition_of_object_node(&g_obj.obj);
+            if source.color != color_id { continue; }
+            match &source.shape {
+                Shape::AreaShape(_) => continue,
+                Shape::LineShape(line) => {
+                    let true_shape = LineShape{
+                        points: line.points.iter().map(|&v|{ MovementNode::option_forward(trans, v) }).collect()
+                    };
+                    paths.push(stitch_path_for_thin_line(&true_shape));
+                }
+                Shape::ThickLineShape(line) => {
+                    let true_shape = ThickLineShape{
+                        points: line.points.iter().map(|&v|{ MovementNode::option_forward(trans, v) }).collect(),
+                        ..*line
+                    };
+                    paths.push(stitch_path_for_thick_line(&true_shape));
+                }
+            }
+        }
+        if !paths.is_empty() {
+            color_list.push(StitchColorGroup{color: color.clone(), paths});
+        }
+    }
+    EmbroideryImage {grp: color_list}
 }

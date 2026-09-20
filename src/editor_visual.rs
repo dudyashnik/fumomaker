@@ -6,6 +6,7 @@ use macroquad::shapes::*;
 use macroquad::window::*;
 use macroquad::text::*;
 
+use std::time::*;
 use std::f32::consts::PI;
 
 use crate::embroidery::*;
@@ -14,7 +15,7 @@ use crate::drawing::*;
 
 impl Scene {
     pub fn get_bg_color(&self) -> Vec3 {
-        vec3(1., 1., 1.)
+        COLOR_VEC_WHITE
     }
 }
 
@@ -36,6 +37,13 @@ pub enum EditorDrawingTool{
     Symmetry,
 }
 
+#[derive(EnumAsInner, Copy, Clone, Eq, PartialEq)]
+pub enum Selection {
+    Nothing,
+    Object(usize),
+    Movement(usize),
+}
+
 pub struct Editor {
     pub scene: Scene,
     pub cam: Camera,
@@ -44,10 +52,9 @@ pub struct Editor {
     pub stitches: Option<EmbroideryImage>,
     pub selected_color: Option<usize>,
     pub selected_tool: EditorDrawingTool,
-    pub selected_shape: Option<usize>,
+    pub selected: Selection,
     pub selected_shape_for_attaching_to_group: Option<usize>,
     pub selected_shape_for_moving: Option<usize>,
-    pub selected_movement: Option<usize>,
     pub selected_movement_for_movement: Option<usize>,
     pub selected_point: Option<usize>,
     pub selected_point_my_start: Vec2,
@@ -59,19 +66,21 @@ pub struct Editor {
     pub held_edited_thin_line: Option<usize>,
     pub held_edited_thick_line: Option<usize>,
     pub held_edited_perimeter: Option<usize>,
+    pub t_started_moving: Option<Instant>,
 }
 
 impl Editor {
     pub fn new(scene: Scene) -> Editor {
-        Editor {scene, cam: Camera {top_left: Vec2::new(-50.0, 50.0), px_in_mm: 33.0},
+        Editor {
+            scene,
+            cam: Camera { top_left: Vec2::new(-50.0, 50.0), px_in_mm: 33.0 },
             mode: EditorMode::Draw,
             stitches: None,
             selected_color: None,
             selected_tool: EditorDrawingTool::Area,
-            selected_shape: None,
+            selected: Selection::Nothing,
             selected_shape_for_attaching_to_group: None,
             selected_shape_for_moving: None,
-            selected_movement: None,
             selected_movement_for_movement: None,
             selected_point: None,
             selected_point_my_start: Vec2::default(),
@@ -83,8 +92,10 @@ impl Editor {
             held_edited_thin_line: None,
             held_edited_thick_line: None,
             held_edited_perimeter: None,
+            t_started_moving: None,
         }
     }
+
     pub fn draw_grid(&self, font: &Font) {
         let scene: &Scene = &self.scene;
         let draw_vertical = |thickness: f32, color: Color, text_color: Option<Color>, x: f32, magnitude: i32| {
@@ -152,32 +163,33 @@ impl Editor {
         (arr_a, arr_b)
     }
 
-    pub fn draw_scene(&self) {
+    pub fn draw_scene(&self, t: f32) {
         let scene: &Scene = &self.scene;
         for (&id, mov) in &scene.movements {
             match mov {
                 MovementNode::SymmetryMovement(sym) => {
-                    let color: Color = if let Some(s_mov_id) = self.selected_movement && s_mov_id == id { ORANGE } else { GRAY };
-                    self.cam.draw_geom_segment(vec2(sym.x, sym.pos_y1), vec2(sym.x, sym.pos_y2), 12., 6., color);
+                    let (a, b) = (vec2(sym.x, sym.pos_y1), vec2(sym.x, sym.pos_y2));
+                    self.cam.draw_geom_segment(a, b, 12., 6.,
+                        if self.selected == Selection::Movement(id) { ORANGE } else { GRAY });
+                    if self.selected == Selection::Movement(id) {
+                        self.cam.draw_dash_line(a, b, 5.0 * t, 16., 20., 40., vec3_to_mq_color(COLOR_VEC_ORANGE))
+                    } else if self.selected_movement_for_movement == Some(id) {
+                        self.cam.draw_dash_line(a, b, 5.0 * t, 16., 20., 40., vec3_to_mq_color(COLOR_VEC_BLUE))
+                    }
                 }
             }
         }
 
         for (&id, g_object) in &scene.objects {
-            let (source, trans): (&RealObjectAttrs, Option<MovementNode>) = match &g_object.obj {
-                ObjectNode::RealObjectNode(real) => (&real.att, None),
-                ObjectNode::GhostObject(ghost) => (
-                    &scene.objects[&ghost.source].obj.as_real_object_node().unwrap().att,
-                    Some(scene.movements[&ghost.movement])
-                )
-            };
+            let (source, trans) = scene.get_source_and_transition_of_object_node(&g_object.obj);
             let color = vec3_to_mq_color(scene.colors[&source.color].clr);
-            match &source.shape {
+            let (scene_points, thickness) = match &source.shape {
                 Shape::AreaShape(_) => { continue }
                 Shape::LineShape(line) => {
                     for i in 0..(line.points.len() - 1) {
                         self.cam.draw_mq_line_on_scene(line.points[i], line.points[i + 1], 2., color);
                     }
+                    (&line.points, 2.)
                 },
                 Shape::ThickLineShape(line) => {
                     assert!(line.points.len() >= 2);
@@ -189,39 +201,41 @@ impl Editor {
                         self.cam.draw_circle(line.points[0], px_thickness, color);
                         self.cam.draw_circle(line.points[line.points.len() - 1], px_thickness / 2., color);
                     }
-                    for i in 0..(line.points.len() - 1) {
-                        self.cam.draw_mq_line_on_scene(line.points[i], line.points[i + 1], px_thickness, color);
-                    }
+                    (&line.points, px_thickness)
                 }
+            };
+            let points: Vec<Vec2> = scene_points.iter().map(|scr|{self.cam.scene_coord_to_screen(MovementNode::option_forward(trans, *scr))}).collect();
+            Camera::draw_path_on_screen(&points, thickness, color);
+            if self.selected == Selection::Object(id){
+                Camera::draw_dashed_path_on_screen(&points, 5. * t, thickness + 2., 20., 40., vec3_to_mq_color(COLOR_VEC_ORANGE));
+            } else if self.selected_shape_for_attaching_to_group == Some(id){
+                Camera::draw_dashed_path_on_screen(&points, 5. * t, thickness + 2., 20., 40., vec3_to_mq_color(COLOR_VEC_BLUE_2));
+            } else if self.selected_shape_for_moving == Some(id) {
+                Camera::draw_dashed_path_on_screen(&points, 5. * t, thickness + 2., 20., 40., vec3_to_mq_color(COLOR_VEC_BLUE));
             }
         }
         for (&gid, group) in &scene.area_groups {
-            let color = scene.colors[&scene.get_object_attrs(&scene.objects[&group.perimeters.first().unwrap()].obj).color].clr;
-            if self.mode.is_draw() || self.mode.is_stitch() {
+            let color = scene.colors[&scene.get_object_attrs_by_id(*group.perimeters.first().unwrap()).color].clr;
+            if self.mode.is_draw() {
                 for (area_id, obj) in group.perimeters.iter().map(|&id| -> (usize, &ObjectNode) { (id, &scene.objects[&id].obj) }) {
-                    let (source, trans): (&AreaShape, Option<MovementNode>) = match obj {
-                        ObjectNode::RealObjectNode(real) => (real.att.shape.as_area_shape().unwrap(), None),
-                        ObjectNode::GhostObject(ghost) => (
-                            scene.objects[&ghost.source].obj.as_real_object_node().unwrap().att.shape.as_area_shape().unwrap(),
-                            Some(scene.movements[&ghost.movement])
-                        )
+                    let (source, trans): (&AreaShape, Option<MovementNode>) = {
+                        let (source_attrs, trans) = scene.get_source_and_transition_of_object_node(obj);
+                        (source_attrs.shape.as_area_shape().unwrap(), trans)
                     };
-                    let mut lb: f32 = 0.;
-                    for i in {
-                        if self.held_edited_perimeter == Some(area_id) { 0..source.points.len()-1 }
-                        else { 0..source.points.len() }
-                    } {
-                        let ni = if i + 1 == source.points.len() { 0 } else { i + 1 };
-                        let a = MovementNode::option_forward(trans, source.points[i]);
-                        let b = MovementNode::option_forward(trans, source.points[ni]);
-                        if source.is_gap {
-                            let sa = self.cam.scene_coord_to_screen(a);
-                            let sb = self.cam.scene_coord_to_screen(b);
-                            Camera::draw_dash_line_on_screen(sa, sb, lb, 4., 27., 30., vec3_to_mq_color(color));
-                            lb += (sa - sb).length();
-                        } else {
-                            self.cam.draw_mq_line_on_scene(a, b, 4., vec3_to_mq_color(color));
-                        }
+                    let points: Vec<Vec2> = source.points.iter().map(|scr|{self.cam.scene_coord_to_screen(MovementNode::option_forward(trans, *scr))}).collect();
+                    if source.is_gap {
+                        Camera::draw_dashed_contour_on_screen(&points, 1. * t, 4., 28., 30.,
+                                    vec3_to_mq_color(color), self.held_edited_perimeter != Some(area_id));
+                    } else {
+                        Camera::draw_contour_on_screen(&points, 4., vec3_to_mq_color(color),
+                                    self.held_edited_perimeter != Some(area_id));
+                    }
+                    if self.selected == Selection::Object(area_id){
+                        Camera::draw_dashed_contour_on_screen(&points, 5. * t, 6., 20., 40., vec3_to_mq_color(COLOR_VEC_ORANGE), true);
+                    } else if self.selected_shape_for_attaching_to_group == Some(area_id){
+                        Camera::draw_dashed_contour_on_screen(&points, 5. * t, 6., 20., 40., vec3_to_mq_color(COLOR_VEC_BLUE_2), true);
+                    } else if self.selected_shape_for_moving == Some(area_id) {
+                        Camera::draw_dashed_contour_on_screen(&points, 5. * t, 6., 20., 40., vec3_to_mq_color(COLOR_VEC_BLUE), true);
                     }
                 }
             }
@@ -250,7 +264,7 @@ impl Editor {
         if self.mode.is_stitch() {
             let compiled: &EmbroideryImage = self.stitches.as_ref().unwrap();
             for color_grp in &compiled.grp {
-                let color = &self.scene.colors[&color_grp.color];
+                let color = &color_grp.color;
                 for path in &color_grp.paths {
                     self.cam.draw_circle_with_perimeter(path.start, 7., vec3_to_mq_color(color.clr), 2., BLUE);
                     let mut prev = path.start;
@@ -270,7 +284,7 @@ impl Editor {
         }
     }
 
-    pub fn draw_info_label(&self, font: &Font, embroidery_file_name: &str){
+    pub fn draw_info_label(&self, font: &Font, embroidery_file_name: &str) {
         let editor_status = match self.mode {
             EditorMode::Draw => format!("Drawing mode. {}", match self.selected_tool {
                 EditorDrawingTool::Symmetry => "Symmetry line tool",
@@ -283,7 +297,7 @@ impl Editor {
         };
         let info_text = format!("{}{}", if self.unsaved { "*Unsaved* " } else { "" }, editor_status);
 
-        let dim = measure_text(&info_text, Some(&font), 30, 1f32);
+        let dim = measure_text(&info_text, Some(font), 30, 1f32);
         let margin = 8f32;
         let top_padding = 7.0;
         draw_rectangle_with_borders((screen_width() - dim.width) / 2f32 - margin, top_padding, dim.width + margin * 2.0, dim.height + margin * 2.0, LIGHTGRAY, WHITE);
@@ -299,7 +313,7 @@ impl Editor {
         let mut y = 10f32;
         for (&id, clr) in &self.scene.colors {
             let label = format!("{} (#{})", clr.name, id);
-            let text_dim = measure_text(&label, Some(&font), font_sz, 1.0);
+            let text_dim = measure_text(&label, Some(font), font_sz, 1.0);
             let fw = margin + text_dim.width + text_margin_square + d + margin;
             if let Some(sc_id) = self.selected_color && sc_id == id {
                 draw_rectangle_lines(screen_width() - fw - padding_right, y, fw, margin + d + margin, 4.0, ORANGE);
@@ -310,25 +324,48 @@ impl Editor {
             y += margin + d + margin;
         }
     }
+}
 
-    pub fn draw_node_list(&self, font: &Font) {
-        let scene: &Scene = &self.scene;
+struct EntryInSideList {
+    border_color: Vec3,
+    pin_color: Vec3,
+    text: String,
+    tab: i32,
+}
+
+impl Editor {
+    fn draw_list_of_nodes(&self, entries: &[EntryInSideList], font: &Font){
         let ic_h = 30.0;
         let margin = 5.0;
         let square_margin_label = 7.0;
         let padding_bot = 3.0;
         let padding_left_normal = 10f32;
-        let padding_left_tabbed = 45f32;
-        let sum_height: f32 = 10.0 +
-            (scene.area_groups.len() +
-                scene.objects.len() + scene.movements.len()) as f32 *
-                (padding_bot + margin * 2.0 + ic_h);
+        let padding_left_tabbed = 35f32;
+        let sum_height: f32 = 10.0 + entries.len() as f32 * (padding_bot + margin * 2.0 + ic_h);
+        let font_sz = 23;
+
         let mut y = screen_height() - sum_height;
-        for (&id, mov) in &scene.movements {
-            draw_rectangle(padding_left_normal, y + margin, ic_h, ic_h, GRAY);
-            let label = format!("Symmetry line #{}", id);
-            draw_my_font(font, &label, padding_left_normal + ic_h + square_margin_label, y + margin + ic_h, BLACK, 23);
+        for e in entries {
+            let pad = padding_left_normal + padding_left_tabbed * e.tab as f32;
+            let text_dim = measure_text(&e.text, Some(font), font_sz, 1f32);
+            draw_rectangle_with_borders(pad, y,
+                                        margin * 3. + ic_h + square_margin_label + text_dim.width, margin * 2.0 + ic_h,
+                                        vec3_to_mq_color(e.border_color), WHITE);
+            draw_color_descr_square(pad + margin, y + margin, ic_h, e.pin_color);
+            draw_my_font(font, &e.text,
+                         pad + margin + ic_h + square_margin_label,
+                         y + margin + ic_h, BLACK, font_sz);
             y += margin * 2.0 + ic_h + padding_bot;
+        }
+    }
+
+    pub fn draw_node_list(&self, font: &Font) {
+        let scene: &Scene = &self.scene;
+        let mut entries: Vec<EntryInSideList> = Vec::with_capacity(scene.area_groups.len() +
+            scene.objects.len() + scene.movements.len());
+
+        for (&id, mov) in &scene.movements {
+            entries.push(EntryInSideList{border_color: COLOR_VEC_BLACK, pin_color: COLOR_VEC_GRAY, text: format!("Symmetry line #{}", id), tab: 0})
         }
         let write_object_label = |my_id: usize, obj: &GroupedObjectNode| {
             format!("{} #{}{}", match scene.get_object_attrs(&obj.obj).shape {
@@ -345,26 +382,41 @@ impl Editor {
                 continue;
             }
             let color = scene.colors[&scene.get_object_attrs(&obj.obj).color].clr;
-            draw_color_descr_square(padding_left_normal, y + margin, ic_h, color);
-            draw_my_font(font, &write_object_label(id, obj),
-                         padding_left_normal + ic_h + square_margin_label, y + margin + ic_h, BLACK, 23);
-            y += margin * 2.0 + ic_h + padding_bot;
+            let border_color = if self.selected == Selection::Object(id){
+                COLOR_VEC_ORANGE
+            } else if self.selected_shape_for_moving == Some(id) {
+                COLOR_VEC_BLUE
+            } else {
+                COLOR_VEC_BLACK
+            };
+            entries.push(EntryInSideList{border_color: border_color, pin_color: color, text: write_object_label(id, obj), tab: 0})
         }
         for (&group_id, group) in &scene.area_groups {
+            let group_is_selected_for_attaching_to_us = {
+                if let Some(so) = self.selected_shape_for_attaching_to_group {
+                    Some(group_id) == self.scene.objects[&so].group
+                } else { false }
+            };
+
             let group_color_id = scene.get_object_attrs(&scene.objects[group.perimeters.first().unwrap()].obj).color;
             let group_color = scene.colors[&group_color_id].clr;
-            draw_color_descr_square(padding_left_normal, y + margin, ic_h, group_color);
-            draw_my_font(font, &format!("Area group #{}", group_id),
-                         padding_left_normal + ic_h + square_margin_label, y + margin + ic_h, BLACK, 23);
-            y += margin * 2.0 + ic_h + padding_bot;
+            entries.push(EntryInSideList{
+                border_color: if group_is_selected_for_attaching_to_us { COLOR_VEC_BLUE_2 } else { COLOR_VEC_BLACK },
+                pin_color: group_color, text: format!("Area group #{}", group_id), tab: 0});
 
             for &area_obj_id in &group.perimeters {
                 let obj = &scene.objects[&area_obj_id];
-                draw_color_descr_square(padding_left_tabbed, y + margin, ic_h, group_color);
-                draw_my_font(font, &write_object_label(area_obj_id, obj),
-                             padding_left_tabbed + ic_h + square_margin_label, y + margin + ic_h, BLACK, 23);
-                y += margin * 2.0 + ic_h + padding_bot;
+                entries.push(EntryInSideList{
+                    border_color: if self.selected == Selection::Object(area_obj_id) {
+                        COLOR_VEC_ORANGE
+                    } else if Some(area_obj_id) == self.selected_shape_for_moving {
+                        COLOR_VEC_BLUE
+                    } else {
+                        COLOR_VEC_BLACK
+                    },
+                    pin_color: group_color, text: write_object_label(area_obj_id, obj), tab: 1})
             }
         }
+        self.draw_list_of_nodes(&entries, font);
     }
 }

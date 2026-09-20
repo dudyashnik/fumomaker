@@ -67,6 +67,7 @@ pub struct LineShape {
 pub struct ThickLineShape {
     pub points: Vec<Vec2>,
     pub thickness: f32,
+    pub cross_dist: f32,
     pub prolonged_tips: bool,
 }
 
@@ -160,4 +161,35 @@ impl Scene {
             ObjectNode::GhostObject(gon) => &self.objects[&gon.source].obj.as_real_object_node().unwrap().att
         }
     }
+
+    pub fn get_object_attrs_by_id(&self, obj_id: usize) -> &RealObjectAttrs{
+        self.get_object_attrs(&self.objects[&obj_id].obj)
+    }
+
+    pub fn get_source_and_transition_of_object_node<'a>(&'a self, obj: &'a ObjectNode) -> (&'a RealObjectAttrs, Option<MovementNode>){
+        match obj {
+            ObjectNode::RealObjectNode(real) => (&real.att, None),
+            ObjectNode::GhostObject(ghost) => (
+                &self.objects[&ghost.source].obj.as_real_object_node().unwrap().att,
+                Some(self.movements[&ghost.movement])
+            )
+        }
+    }
+
+    pub fn get_object_point_path(&self, obj_id: usize) -> Vec<Vec2> {
+        let obj = &self.objects[&obj_id].obj;
+        let (source, trans) = self.get_source_and_transition_of_object_node(obj);
+        (match &source.shape {
+            Shape::AreaShape(area ) => {
+                let mut p = area.points.clone();
+                p.push(*p.first().unwrap()); p
+            },
+            Shape::LineShape(line) => line.points.clone(),
+            Shape::ThickLineShape(line) => line.points.clone(),
+        }).iter().map(|&v|{ MovementNode::option_forward(trans, v) }).collect()
+    }
+}
+
+pub fn center_of_contour_of_points(points: &[Vec2]) -> Vec2 {
+    points.iter().sum::<Vec2>() / (points.len() as f32)
 }

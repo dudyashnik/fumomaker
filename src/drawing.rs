@@ -1,4 +1,5 @@
 use std::f32::consts::PI;
+use enum_as_inner::EnumAsInner;
 use macroquad::prelude::glam::*;
 use macroquad::color::*;
 use macroquad::prelude::{draw_text_ex, TextParams};
@@ -7,6 +8,15 @@ use macroquad::window::*;
 use macroquad::text::*;
 use macroquad::input::*;
 use crate::util::*;
+
+pub const COLOR_VEC_BLACK: Vec3 = vec3(0., 0., 0.);
+pub const COLOR_VEC_GRAY: Vec3 = vec3(0.5, 0.5, 0.5);
+pub const COLOR_VEC_WHITE: Vec3 = vec3(1., 1., 1.);
+pub const COLOR_VEC_ORANGE: Vec3 = vec3(0.9, 0.5, 0.);
+pub const COLOR_VEC_BLUE: Vec3 = vec3(0.1, 0.2, 0.95);
+pub const COLOR_VEC_LIGHT_BLUE: Vec3 = vec3(0.5, 0.6, 1.);
+pub const COLOR_VEC_PURPLE: Vec3 = vec3(0.8, 0., 1.);
+pub const COLOR_VEC_BLUE_2: Vec3 = vec3(0.0, 0.5, 1.);
 
 const DOT_RADIUS: f32 = 6.;
 
@@ -27,15 +37,15 @@ pub fn is_no_mod_down() -> bool {
 }
 
 pub fn is_pressed_with_shift(key_code: KeyCode) -> bool {
-    is_key_pressed(key_code) && is_shift() && !is_ctrl() && !is_shift()
+    is_key_pressed(key_code) && is_shift() && !is_ctrl() && !is_alt()
 }
 
 pub fn is_pressed_with_ctrl(key_code: KeyCode) -> bool {
-    is_key_pressed(key_code) && !is_shift() && is_ctrl() && !is_shift()
+    is_key_pressed(key_code) && !is_shift() && is_ctrl() && !is_alt()
 }
 
 pub fn is_pressed_with_alt(key_code: KeyCode) -> bool {
-    is_key_pressed(key_code) && !is_shift() && !is_ctrl() && is_shift()
+    is_key_pressed(key_code) && !is_shift() && !is_ctrl() && is_alt()
 }
 
 pub fn is_pressed_with_no_mod(key_code: KeyCode) -> bool {
@@ -79,6 +89,22 @@ pub fn draw_color_descr_square(px: f32, py: f32, dim: f32, color: Vec3){
     draw_rectangle(px, py, dim, dim, Color::new(color.x, color.y, color.z, 1.0));
 }
 
+// a, b, c are screen coordinates
+pub fn dist_to_segment_on_screen(a: Vec2, b: Vec2, c: Vec2) -> f32 {
+    let ab = b - a;
+    let ac = c - a;
+    let len_sq = ab.dot(ab);
+    let t = if len_sq == 0.0 { 0.0 } else { (ac.dot(ab) / len_sq).clamp(0.0, 1.0) };
+    let closest = a + ab * t;
+    (c - closest).length()
+}
+
+#[derive(EnumAsInner, Copy, Clone)]
+enum DrawnPathStyle {
+    None,
+    Dashed(Color),
+    Plain(Color),
+}
 
 #[derive(Clone)]
 pub struct Camera {
@@ -224,5 +250,75 @@ impl Camera {
         Self::draw_dash_line_on_screen(
             self.scene_coord_to_screen(scene_a), self.scene_coord_to_screen(scene_b),
             px_offset, thickness, worm_length, worm_tail_dist, color);
+    }
+
+    pub fn draw_dashed_path_on_screen(p: &[Vec2], px_offset: f32, thickness: f32,
+                            worm_length: f32, worm_tail_dist: f32, color: Color){
+        let mut lb: f32 = px_offset;
+        for i in 1..p.len() {
+            let a = p[i - 1];
+            let b = p[i];
+            Camera::draw_dash_line_on_screen(a, b, lb, thickness, worm_length, worm_tail_dist, color);
+            lb += (-a + b).length();
+        }
+    }
+
+    pub fn draw_dashed_contour_on_screen(p: &[Vec2], px_offset: f32, thickness: f32,
+                 worm_length: f32, worm_tail_dist: f32, color: Color, closed: bool){
+        let mut lb: f32 = px_offset;
+        for i in (if closed {1..p.len() + 1} else {1..p.len()}) {
+            let a = p[i - 1];
+            let b = p[if i >= p.len() { 0 } else { i }];
+            Camera::draw_dash_line_on_screen(a, b, lb, thickness, worm_length, worm_tail_dist, color);
+            lb += (-a + b).length();
+        }
+    }
+
+    pub fn draw_path_on_screen(p: &[Vec2], thickness: f32, color: Color){
+        for i in 1..p.len() {
+            let a = p[i - 1];
+            let b = p[i];
+            draw_line(a.x, a.y, b.x, b.y, thickness, color);
+        }
+    }
+
+    pub fn draw_contour_on_screen(p: &[Vec2], thickness: f32, color: Color, closed: bool){
+        for i in (if closed {1..p.len() + 1} else {1..p.len()}) {
+            let a = p[i - 1];
+            let b = p[if i >= p.len() { 0 } else { i }];
+            draw_line(a.x, a.y, b.x, b.y, thickness, color);
+        }
+    }
+
+    // (a & b) are in scene space coordinates. sc is in screen coordinates
+    pub fn distance_to_segment(&self, sc: Vec2, a: Vec2, b: Vec2) -> f32 {
+        dist_to_segment_on_screen(self.scene_coord_to_screen(a), self.scene_coord_to_screen(b), sc)
+    }
+
+    // segment points a, b are in scene space coordinates
+    pub fn is_mouse_near_segment(&self, a: Vec2, b: Vec2) -> bool {
+        self.distance_to_segment(get_mouse_position_vec2(), a, b) < DOT_RADIUS
+    }
+
+    pub fn is_mouse_near_path(&self, path: &[Vec2]) -> bool {
+        for i in 1..path.len(){
+            let a = path[i - 1];
+            let b = path[i];
+            if self.distance_to_segment(get_mouse_position_vec2(), a, b) < DOT_RADIUS {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn to_which_path_segment_we_are_close(&self, path: &[Vec2]) -> Option<usize> {
+        for i in 1..path.len(){
+            let a = path[i - 1];
+            let b = path[i];
+            if self.distance_to_segment(get_mouse_position_vec2(), a, b) < DOT_RADIUS {
+                return Some(i - 1);
+            }
+        }
+        return None;
     }
 }
