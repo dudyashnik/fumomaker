@@ -379,7 +379,8 @@ impl Editor {
         if let Some(group_id) = self.held_arrow_end_embroidery_control_group {
             let group: &mut AreaShapeGroup = self.scene.area_groups.get_mut(&group_id).unwrap();
             let a = self.cam.scene_coord_to_screen(group.control_center_pos);
-            group.control_fill_dir_offset = (get_mouse_position_vec2() - a).normalize();
+            let scr_dir = (get_mouse_position_vec2() - a).normalize();
+            group.control_fill_dir_offset = vec2(scr_dir.x, -scr_dir.y);
         }
 
         if let Some(mov_id) = self.held_edited_sym {

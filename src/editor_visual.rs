@@ -13,6 +13,7 @@ use crate::embroidery::*;
 use crate::util::*;
 use crate::drawing::*;
 use crate::scene::*;
+use crate::trenches::*;
 
 impl Scene {
     pub fn get_bg_color(&self) -> Vec3 {
@@ -169,18 +170,19 @@ impl Editor {
     // Returns screen coords
     pub fn get_area_group_control_arrow_scr_pos(&self, group: &AreaShapeGroup) -> (Vec2, Vec2) {
         let arr_a = self.cam.scene_coord_to_screen(group.control_center_pos);
-        let arr_b = arr_a + group.control_fill_dir_offset.normalize() * 250.;
+        let scr_dir = vec2(group.control_fill_dir_offset.x, -group.control_fill_dir_offset.y).normalize();
+        let arr_b = arr_a + scr_dir * 190.;
         (arr_a, arr_b)
     }
 
-    pub fn draw_scene(&self, t: f32) {
+    fn draw_scene_objects(&self, t: f32){
         let scene: &Scene = &self.scene;
         for (&id, mov) in &scene.movements {
             match mov {
                 MovementNode::SymmetryMovement(sym) => {
                     let (a, b) = (vec2(sym.x, sym.pos_y1), vec2(sym.x, sym.pos_y2));
                     self.cam.draw_geom_segment(a, b, 12., 6.,
-                        if self.selected == Selection::Movement(id) { ORANGE } else { GRAY });
+                                               if self.selected == Selection::Movement(id) { ORANGE } else { GRAY });
                     if self.selected == Selection::Movement(id) {
                         self.cam.draw_dash_line(a, b, 5.0 * t, 16., 20., 40., vec3_to_mq_color(COLOR_VEC_ORANGE))
                     } else if self.selected_movement_for_movement == Some(id) {
@@ -235,10 +237,10 @@ impl Editor {
                     let points: Vec<Vec2> = source.points.iter().map(|scr|{self.cam.scene_coord_to_screen(MovementNode::option_forward(trans, *scr))}).collect();
                     if source.is_gap {
                         Camera::draw_dashed_contour_on_screen(&points, 1. * t, 4., 28., 30.,
-                                    vec3_to_mq_color(color), self.held_edited_perimeter != Some(area_id));
+                                                              vec3_to_mq_color(color), self.held_edited_perimeter != Some(area_id));
                     } else {
                         Camera::draw_contour_on_screen(&points, 4., vec3_to_mq_color(color),
-                                    self.held_edited_perimeter != Some(area_id));
+                                                       self.held_edited_perimeter != Some(area_id));
                     }
                     if self.selected == Selection::Object(area_id){
                         Camera::draw_dashed_contour_on_screen(&points, 5. * t, 6., 20., 40., vec3_to_mq_color(COLOR_VEC_ORANGE), true);
@@ -248,11 +250,9 @@ impl Editor {
                         Camera::draw_dashed_contour_on_screen(&points, 5. * t, 6., 20., 40., vec3_to_mq_color(COLOR_VEC_BLUE), true);
                     }
                 }
-            }
-            if self.mode.is_embroidery() {
-                let true_dir = vec2(group.control_fill_dir_offset.x, -group.control_fill_dir_offset.y);
+            } else if self.mode.is_embroidery() {
                 let (hidden, primary) = get_two_trench_zones(
-                    &self.scene, &group.perimeters, group.control_center_pos, true_dir, group.f_params);
+                    &self.scene, &group.perimeters, group.control_center_pos, group.control_fill_dir_offset, group.f_params);
                 for (trench, thickness, alpha) in [(hidden, 3., 0.35), (primary, 5., 0.67)] {
                     for (yi, line) in trench.lines.iter().enumerate() {
                         for seg in line {
@@ -270,34 +270,42 @@ impl Editor {
                 Camera::draw_circle_with_perimeter_on_screen(arr_b, 4., BLANK, 2., dir_arrow_color);
             }
         }
+    }
 
-        if self.mode.is_stitch() {
-            'draw: {
-                let mut d: usize = 0;
-                let compiled: &EmbroideryImage = self.stitches.as_ref().unwrap();
-                for color_grp in &compiled.grp {
-                    let color = &color_grp.color;
-                    for path in &color_grp.paths {
-                        self.cam.draw_circle_with_perimeter(path.start, 7., vec3_to_mq_color(color.clr), 2., BLUE);
+    fn draw_scene_stitches(&self) {
+        'draw: {
+            let mut d: usize = 0;
+            let compiled: &EmbroideryImage = self.stitches.as_ref().unwrap();
+            for color_grp in &compiled.grp {
+                let color = &color_grp.color;
+                for path in &color_grp.paths {
+                    self.cam.draw_circle_with_perimeter(path.start, 7., vec3_to_mq_color(color.clr), 2., BLUE);
+                    d += 1;
+                    if d >= self.shown_stitches { break }
+                    let mut prev = path.start;
+                    for stitch in &path.stitches {
+                        self.cam.draw_arrow(prev, stitch.end, 2., match stitch.kind {
+                            StitchKind::Normal => BLUE,
+                            StitchKind::NormalBorder => Color::new(0.7, 0.7, 1., 1.),
+                            StitchKind::HoppingInDescend => RED,
+                            StitchKind::HoppingToTurnBack => Color::new(0.8, 0.2, 0.8, 1.),
+                            StitchKind::HoppingStartOfJob => Color::new(1., 0.7, 0.7, 1.),
+                            StitchKind::TransLevel => GREEN,
+                        });
                         d += 1;
                         if d >= self.shown_stitches { break }
-                        let mut prev = path.start;
-                        for stitch in &path.stitches {
-                            self.cam.draw_arrow(prev, stitch.end, 2., match stitch.kind {
-                                StitchKind::Normal => BLUE,
-                                StitchKind::NormalBorder => Color::new(0.7, 0.7, 1., 1.),
-                                StitchKind::HoppingInDescend => RED,
-                                StitchKind::HoppingToTurnBack => Color::new(0.8, 0.2, 0.8, 1.),
-                                StitchKind::HoppingStartOfJob => Color::new(1., 0.7, 0.7, 1.),
-                                StitchKind::TransLevel => GREEN,
-                            });
-                            d += 1;
-                            if d >= self.shown_stitches { break }
-                            prev = stitch.end;
-                        }
+                        prev = stitch.end;
                     }
                 }
             }
+        }
+    }
+
+    pub fn draw_scene(&self, t: f32) {
+        if self.mode.is_draw() || self.mode.is_embroidery() {
+            self.draw_scene_objects(t);
+        } else if self.mode.is_stitch() {
+            self.draw_scene_stitches();
         }
     }
 

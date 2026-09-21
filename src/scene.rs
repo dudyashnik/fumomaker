@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-pub use macroquad::prelude::glam;
-pub use glam::*;
+use glam::*;
 use enum_as_inner::EnumAsInner;
 use serde::{Serialize, Deserialize};
 use crate::{CoolColor, COOL_COLORS};

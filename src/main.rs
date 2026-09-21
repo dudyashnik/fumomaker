@@ -7,6 +7,7 @@ mod editor_visual;
 mod drawing;
 mod editor;
 mod files;
+mod trenches;
 
 use std::cmp::min;
 use macroquad::window::*;

@@ -10,8 +10,7 @@ from pyembroidery import STITCH, JUMP, COLOR_CHANGE, END
 MM_TO_UNITS = 10
 
 def mm_to_units(point):
-    x, y = point[0], point[1]
-    return int(round(x * MM_TO_UNITS)), int(round(y * MM_TO_UNITS))
+    return int(round(point[0] * MM_TO_UNITS)), int(round(point[1] * MM_TO_UNITS))
 
 def color_vec_to_hex_int(clr):
     return (round(clr[0] * 255) << 16) + (round(clr[1] * 255) << 8) + (round(clr[2] * 255) << 0)
@@ -39,7 +38,7 @@ def convert_json_to_vp3(input_json_path, output_vp3_path):
 
             # Add actual stitch endpoints. If stitches include a third
             # element for editor-only stitch type, ignore it for VP3 output.
-            for point_x, point_y, point_kind in line.get("stitches", []):
+            for point_x, point_y, point_kind in line["stitches"]:
                 x, y = mm_to_units((point_x, point_y))
                 pattern.add_stitch_absolute(STITCH, x, y)
 

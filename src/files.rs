@@ -1,3 +1,5 @@
+use glam::*;
+
 use crate::embroidery::*;
 use crate::scene::*;
 use crate::util::*;
