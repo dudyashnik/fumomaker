@@ -125,9 +125,9 @@ pub struct AreaDoubleFillParams {
 
 impl Default for AreaDoubleFillParams {
     fn default() -> Self { AreaDoubleFillParams {
-        primal_fill: AreaFillParams {fill_line_dist: 0.2, stitch_len: 0.8, stitch_phase_offset: 0.33},
+        primal_fill: AreaFillParams {fill_line_dist: 0.33, stitch_len: 0.8, stitch_phase_offset: 0.5},
         hidden_fill: AreaFillParams {fill_line_dist: 0.5, stitch_len: 1.6, stitch_phase_offset: 0.33},
-        hopping_stitch_len: 1.9
+        hopping_stitch_len: 3.
     } }
 }
 

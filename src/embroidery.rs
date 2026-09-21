@@ -370,25 +370,43 @@ pub fn stitch_path_for_thin_line(line: &LineShape) -> StitchPath {
 pub fn stitch_path_for_thick_line(line: &ThickLineShape) -> StitchPath {
     let d = line.thickness / 2.;
     let mut stitches: Vec<Stitch> = Vec::new();
-    let get_to_the_left = |a: Vec2, b: Vec2, l: f32| -> Vec2 {
+    let get_to_the_left = |a: Vec2, b: Vec2| -> Vec2 {
         let dir = (-a + b).normalize();
-        let full_l = (-a + b).length();
-        let left = vec2(-dir.y, dir.x);
-        left * (if l < 0. { 1. - (-l) / d } else if l > full_l {1. - (l - full_l) / d } else { 1. })
+        vec2(-dir.y, dir.x)
     };
     let mut points: Vec<Vec2> = Vec::new();
     let mut w = if line.prolonged_tips { -d } else { 0. };
     for i in 1..line.points.len() {
-        let b: Vec2 = line.points[i - 1];
-        let c: Vec2 = line.points[i];
-        let end = (c - b).length() + if line.prolonged_tips && i == line.points.len() - 1 { d } else { 0. };
+        let vb: Vec2 = line.points[i - 1];
+        let vc: Vec2 = line.points[i];
+        let full_l = (vb - vc).length();
+        let end = full_l + if line.prolonged_tips && i == line.points.len() - 1 { d } else { 0. };
         while w < end{
-            let left = get_to_the_left(b, c, w);
-            points.push(b + (-b+c).normalize() * w - left);
-            points.push(b + (-b+c).normalize() * w + left);
+            let left = {
+                if w < d && i - 1 >= 1 {
+                    let va = line.points[i - 2];
+                    let coef_m = (w - (-d)) / (2. * d);
+                    (get_to_the_left(va, vb) * (1. - coef_m) + get_to_the_left(vb, vc) * coef_m).normalize()
+                } else if w > full_l - d && i + 1 < line.points.len() {
+                    let vd = line.points[i + 1];
+                    let coef_m = ((full_l + d) - w) / (2. * d);
+                    (get_to_the_left(vb, vc) * coef_m + get_to_the_left(vc, vd) * (1. - coef_m)).normalize()
+                } else {
+                    get_to_the_left(vb, vc)
+                }
+            };
+            let side = left * (if w < 0. {
+                1. - (-w) / d
+            } else if w > full_l {
+                1. - (w - full_l) / d
+            } else {
+                1.
+            });
+            points.push(vb + (-vb+vc).normalize() * w - left);
+            points.push(vb + (-vb+vc).normalize() * w + left);
             w += line.cross_dist;
         }
-        w -= (c - b).length();
+        w -= full_l;
     }
     StitchPath::from_normal_slice(&points)
 }
