@@ -12,6 +12,7 @@ use std::f32::consts::PI;
 use crate::embroidery::*;
 use crate::util::*;
 use crate::drawing::*;
+use crate::scene::*;
 
 impl Scene {
     pub fn get_bg_color(&self) -> Vec3 {
@@ -50,6 +51,7 @@ pub struct Editor {
     pub mode: EditorMode,
     // `stitches` will be shown only in Stitch mode
     pub stitches: Option<EmbroideryImage>,
+    pub shown_stitches: usize,
     pub selected_color: Option<usize>,
     pub selected_tool: EditorDrawingTool,
     pub selected: Selection,
@@ -76,6 +78,7 @@ impl Editor {
             cam: Camera { top_left: Vec2::new(-50.0, 50.0), px_in_mm: 33.0 },
             mode: EditorMode::Draw,
             stitches: None,
+            shown_stitches: 0,
             selected_color: None,
             selected_tool: EditorDrawingTool::Area,
             selected: Selection::Nothing,
@@ -94,6 +97,13 @@ impl Editor {
             held_edited_perimeter: None,
             t_started_moving: None,
         }
+    }
+
+    pub fn get_total_stitch_number_in_shown_image(&self) -> usize {
+        self.stitches.as_ref().unwrap().grp.iter().map(|g|->usize {
+            g.paths.iter().map(|path|->usize {path.stitches.len()}).sum::<usize>()
+                + g.paths.len()
+        }).sum()
     }
 
     pub fn draw_grid(&self, font: &Font) {
@@ -262,29 +272,36 @@ impl Editor {
         }
 
         if self.mode.is_stitch() {
-            let compiled: &EmbroideryImage = self.stitches.as_ref().unwrap();
-            for color_grp in &compiled.grp {
-                let color = &color_grp.color;
-                for path in &color_grp.paths {
-                    self.cam.draw_circle_with_perimeter(path.start, 7., vec3_to_mq_color(color.clr), 2., BLUE);
-                    let mut prev = path.start;
-                    for stitch in &path.stitches {
-                        self.cam.draw_arrow(prev, stitch.end, 2., match stitch.kind {
-                            StitchKind::Normal => BLUE,
-                            StitchKind::NormalBorder => Color::new(0.7, 0.7, 1., 1.),
-                            StitchKind::HoppingInDescend => RED,
-                            StitchKind::HoppingToTurnBack => Color::new(0.8, 0.2, 0.8, 1.),
-                            StitchKind::HoppingStartOfJob => Color::new(1., 0.7, 0.7, 1.),
-                            StitchKind::TransLevel => GREEN,
-                        });
-                        prev = stitch.end;
+            'draw: {
+                let mut d: usize = 0;
+                let compiled: &EmbroideryImage = self.stitches.as_ref().unwrap();
+                for color_grp in &compiled.grp {
+                    let color = &color_grp.color;
+                    for path in &color_grp.paths {
+                        self.cam.draw_circle_with_perimeter(path.start, 7., vec3_to_mq_color(color.clr), 2., BLUE);
+                        d += 1;
+                        if d >= self.shown_stitches { break }
+                        let mut prev = path.start;
+                        for stitch in &path.stitches {
+                            self.cam.draw_arrow(prev, stitch.end, 2., match stitch.kind {
+                                StitchKind::Normal => BLUE,
+                                StitchKind::NormalBorder => Color::new(0.7, 0.7, 1., 1.),
+                                StitchKind::HoppingInDescend => RED,
+                                StitchKind::HoppingToTurnBack => Color::new(0.8, 0.2, 0.8, 1.),
+                                StitchKind::HoppingStartOfJob => Color::new(1., 0.7, 0.7, 1.),
+                                StitchKind::TransLevel => GREEN,
+                            });
+                            d += 1;
+                            if d >= self.shown_stitches { break }
+                            prev = stitch.end;
+                        }
                     }
                 }
             }
         }
     }
 
-    pub fn draw_info_label(&self, font: &Font, embroidery_file_name: &str) {
+    pub fn draw_info_label(&self, font: &Font, embroidery_file_name: &str, error: &str) {
         let editor_status = match self.mode {
             EditorMode::Draw => format!("Drawing mode. {}", match self.selected_tool {
                 EditorDrawingTool::Symmetry => "Symmetry line tool",
@@ -293,7 +310,9 @@ impl Editor {
                 EditorDrawingTool::ThickLine => "Thick path drawing tool",
             }),
             EditorMode::Embroidery => format!("Configuring embroidery"),
-            EditorMode::Stitch => format!("Embroidery finished. Will export to {}", embroidery_file_name),
+            EditorMode::Stitch => format!("Embroidery finished. Will export to {}{}",
+                                          embroidery_file_name,
+                                          if error.is_empty() { "".to_string() } else { format!(". {error}") }),
         };
         let info_text = format!("{}{}", if self.unsaved { "*Unsaved* " } else { "" }, editor_status);
 

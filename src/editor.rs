@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use macroquad::input::{is_key_down, mouse_wheel, KeyCode};
 use crate::drawing::{get_mouse_position_vec2, is_mouse_near_dot, is_no_mod_down, is_shift};
 use crate::editor_visual::*;
+use crate::embroidery::build_embroidery_image;
 use crate::scene::*;
 use crate::util::btreemap_usize_get_unused_id;
 
@@ -492,7 +493,8 @@ impl Editor {
             self.command_finish_drawing_progress();
             self.mode = mode;
             if mode.is_stitch(){
-                // todo: embroidery
+                self.stitches = Some(build_embroidery_image(&self.scene));
+                self.shown_stitches = self.get_total_stitch_number_in_shown_image();
             } else {
                 self.stitches = None;
             }
@@ -509,5 +511,17 @@ impl Editor {
 
     pub fn command_set_editor_mode_stitch_image_viewing(&mut self){
         self.set_editor_mode(EditorMode::Stitch);
+    }
+
+    pub fn command_stitch_image_viewing_progress_back(&mut self, count: usize){
+        if !self.mode.is_stitch() { return; }
+        let new: i64 = (self.shown_stitches as i64) - (count as i64);
+        self.shown_stitches = i64::max(0, new) as usize;
+    }
+
+    pub fn command_stitch_image_viewing_progress_forward(&mut self, count: usize){
+        if !self.mode.is_stitch() { return; }
+        let new = self.shown_stitches + count;
+        self.shown_stitches = usize::min(self.get_total_stitch_number_in_shown_image(), new);
     }
 }

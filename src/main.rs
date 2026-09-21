@@ -6,6 +6,7 @@ mod util;
 mod editor_visual;
 mod drawing;
 mod editor;
+mod files;
 
 use std::cmp::min;
 use macroquad::window::*;
@@ -24,6 +25,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::f32::consts::PI;
 use std::time::Instant;
+use std::fs;
 use enum_as_inner::EnumAsInner;
 
 use util::*;
@@ -32,6 +34,7 @@ use embroidery::*;
 use drawing::*;
 use editor_visual::*;
 use editor::*;
+use files::*;
 
 #[derive(Clone)]
 struct CoolColor {
@@ -68,37 +71,22 @@ async fn main() {
         return;
     }
     let scene_file_name: String = args[1].clone();
-    let embroidery_file_name: String = scene_file_name + ".emb.json";
+    let embroidery_file_name: String = scene_file_name.clone() + ".emb.json";
     let font = load_ttf_font("src/fonts/GreatVibes-Regular.ttf").await.expect("Can't load font");
 
-    let mut editor = Editor::new(Scene::default());
+    let mut last_error_message: String = "".to_string();
 
-    editor.scene.colors.insert(0, UsedColor::from(&COOL_COLORS[0]));
-    editor.scene.colors.insert(1, UsedColor::from(&COOL_COLORS[1]));
-    editor.scene.colors.insert(2, UsedColor::from(&COOL_COLORS[2]));
-    editor.selected_color = Some(1);
-    editor.scene.movements.insert(0, MovementNode::SymmetryMovement(SymmetryMovement{x: 110.0, pos_y1: 2.0, pos_y2: 30.0}));
-    editor.scene.movements.insert(1, MovementNode::SymmetryMovement(SymmetryMovement{x: -110.0, pos_y1: 2.0, pos_y2: 30.0}));
-    editor.selected = Selection::Movement(0);
-    editor.scene.objects.insert(0, GroupedObjectNode{obj: ObjectNode::GhostObject(GhostObject{movement: 1, source: 1 }), group: Some(0)});
-    editor.scene.objects.insert(1, GroupedObjectNode{obj: ObjectNode::RealObjectNode(
-        RealObjectNode{att: RealObjectAttrs{shape: Shape::AreaShape(AreaShape{
-            points: vec![vec2(10.0, 10.0), vec2(100.0, 10.0), vec2(10.0, 100.0)], is_gap: false
-        }), color: 0}, clone: Some(0)}), group: Some(1)});
-    editor.scene.objects.insert(2, GroupedObjectNode{obj: ObjectNode::GhostObject(GhostObject{movement: 1, source: 3 }), group: Some(2)});
-    editor.scene.objects.insert(3, GroupedObjectNode{obj: ObjectNode::RealObjectNode(
-        RealObjectNode{att: RealObjectAttrs{shape: Shape::AreaShape(AreaShape{
-            points: vec![vec2(10.0, 210.0), vec2(100.0, 210.0), vec2(10.0, 300.0)], is_gap: false
-        }), color: 2}, clone: Some(2)}), group: Some(2)});
-    editor.scene.area_groups.insert(0, AreaShapeGroup{control_center_pos: vec2(30.0, 30.0),
-        control_fill_dir_offset: vec2(90.0, 0.0), f_params: AreaDoubleFillParams::default(),
-        perimeters: BTreeSet::from([0])});
-    editor.scene.area_groups.insert(1, AreaShapeGroup{control_center_pos: vec2(-100.0, 30.0),
-        control_fill_dir_offset: vec2(90.0, 0.0), f_params: AreaDoubleFillParams::default(),
-        perimeters: BTreeSet::from([1])});
-    editor.scene.area_groups.insert(2, AreaShapeGroup{control_center_pos: vec2(0.0, 120.0),
-        control_fill_dir_offset: vec2(90.0, 0.0), f_params: AreaDoubleFillParams::default(),
-        perimeters: BTreeSet::from([2, 3])});
+    let mut editor = {
+        let scene = if let Ok(q) = fs::exists(&scene_file_name) && q {
+            load_scene_from_file(&scene_file_name).unwrap_or_else(|err| {
+                last_error_message = err.to_string();
+                Scene::default()
+            })
+        } else {
+            Scene::default()
+        };
+        Editor::new(scene)
+    };
 
     prevent_quit();
     let t_start = Instant::now();
@@ -108,9 +96,23 @@ async fn main() {
         clear_background(vec3_to_mq_color(editor.scene.get_bg_color()));
         editor.draw_grid(&font);
         editor.draw_scene((t_now - t_start).as_secs_f32());
-        editor.draw_info_label(&font, &embroidery_file_name);
+        editor.draw_info_label(&font, &embroidery_file_name, &last_error_message);
         editor.draw_color_list(&font);
         editor.draw_node_list(&font);
+
+        if is_pressed_with_ctrl(KeyCode::S) {
+            if let Err(err) = save_scene_to_file(&scene_file_name, &editor.scene) {
+                last_error_message = err.to_string();
+            }
+        }
+
+        if is_pressed_with_ctrl(KeyCode::E){
+            if let Some(img) = &editor.stitches {
+                if let Err(err) = save_embroidery_image_to_file(&embroidery_file_name, img){
+                    last_error_message = err.to_string();
+                }
+            }
+        }
 
         if is_mouse_button_pressed(MouseButton::Left) && is_no_mod_down(){
             editor.command_embroidery_config_control_click_normal();
@@ -197,6 +199,26 @@ async fn main() {
             editor.command_delete_selected_suppress_ghost_recoil();
         }
 
+        if is_pressed_with_no_mod(KeyCode::Left){
+            editor.command_stitch_image_viewing_progress_back(1);
+        }
+        if is_pressed_with_ctrl(KeyCode::Left){
+            editor.command_stitch_image_viewing_progress_back(10);
+        }
+        if is_pressed_with_alt(KeyCode::Left){
+            editor.command_stitch_image_viewing_progress_back(100);
+        }
+
+        if is_pressed_with_no_mod(KeyCode::Right){
+            editor.command_stitch_image_viewing_progress_forward(1);
+        }
+        if is_pressed_with_ctrl(KeyCode::Right){
+            editor.command_stitch_image_viewing_progress_forward(10);
+        }
+        if is_pressed_with_alt(KeyCode::Right){
+            editor.command_stitch_image_viewing_progress_forward(100);
+        }
+
         editor.command_ack_pointer_motion();
         editor.command_ack_mouse_wheel_motion();
 
@@ -205,6 +227,8 @@ async fn main() {
                                                    is_key_down(KeyCode::W), is_key_down(KeyCode::A),
                                                    is_key_down(KeyCode::S), is_key_down(KeyCode::D));
         }
+
+
 
         if is_quit_requested(){
             // todo: save

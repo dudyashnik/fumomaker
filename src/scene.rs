@@ -2,15 +2,17 @@ use std::collections::{BTreeMap, BTreeSet};
 pub use macroquad::prelude::glam;
 pub use glam::*;
 use enum_as_inner::EnumAsInner;
+use serde::{Serialize, Deserialize};
+use crate::{CoolColor, COOL_COLORS};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SymmetryMovement{
     pub x: f32,
     pub pos_y1: f32,
     pub pos_y2: f32,
 }
 
-#[derive(EnumAsInner, Clone, Copy)]
+#[derive(EnumAsInner, Clone, Copy, Serialize, Deserialize)]
 pub enum MovementNode{
     SymmetryMovement(SymmetryMovement),
 }
@@ -46,24 +48,24 @@ impl MovementNode {
 }
 
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct UsedColor {
     pub clr: Vec3,
     pub name: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AreaShape {
     pub points: Vec<Vec2>,
     pub is_gap: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LineShape {
     pub points: Vec<Vec2>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ThickLineShape {
     pub points: Vec<Vec2>,
     pub thickness: f32,
@@ -71,51 +73,51 @@ pub struct ThickLineShape {
     pub prolonged_tips: bool,
 }
 
-#[derive(Clone, EnumAsInner)]
+#[derive(Clone, EnumAsInner, Serialize, Deserialize)]
 pub enum Shape {
     AreaShape(AreaShape),
     LineShape(LineShape),
     ThickLineShape(ThickLineShape),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RealObjectAttrs {
     pub shape: Shape,
     pub color: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RealObjectNode {
     pub att: RealObjectAttrs,
     pub clone: Option<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct GhostObject {
     pub movement: usize,
     pub source: usize,
 }
 
-#[derive(Clone, EnumAsInner)]
+#[derive(Clone, EnumAsInner, Serialize, Deserialize)]
 pub enum ObjectNode {
     RealObjectNode(RealObjectNode),
     GhostObject(GhostObject),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct GroupedObjectNode {
     pub obj: ObjectNode,
     pub group: Option<usize>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct AreaFillParams {
     pub fill_line_dist: f32,
     pub stitch_len: f32,
     pub stitch_phase_offset: f32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct AreaDoubleFillParams {
     pub primal_fill: AreaFillParams,
     pub hidden_fill: AreaFillParams,
@@ -130,8 +132,7 @@ impl Default for AreaDoubleFillParams {
     } }
 }
 
-
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AreaShapeGroup {
     pub control_center_pos: Vec2,
     pub control_fill_dir_offset: Vec2,
@@ -139,7 +140,7 @@ pub struct AreaShapeGroup {
     pub perimeters: BTreeSet<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Scene {
     pub colors: BTreeMap<usize, UsedColor>,
     pub objects: BTreeMap<usize, GroupedObjectNode>,
@@ -149,7 +150,8 @@ pub struct Scene {
 
 impl Default for Scene {
     fn default() -> Scene {
-        Scene { colors: Default::default(), objects: Default::default(),
+        Scene { colors: COOL_COLORS.iter().map(|&CoolColor{clr, name}|{ UsedColor{clr, name: name.to_string()} })
+            .enumerate().collect(), objects: Default::default(),
             movements: Default::default(), area_groups: Default::default(), }
     }
 }

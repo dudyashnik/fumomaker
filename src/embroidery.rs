@@ -1,10 +1,13 @@
 use std::cmp::Ordering;
-pub use super::scene::*;
 use std::collections::{BTreeSet, BTreeMap, HashSet, HashMap};
 use std::iter::{IntoIterator, Iterator};
 use enum_as_inner::EnumAsInner;
+
+use serde::{Deserialize, Serialize};
+
 use crate::embroidery::StitchKind::HoppingInDescend;
-use super::util::*;
+use crate::util::*;
+use crate::scene::*;
 
 // From drawing mode to embroidery configuration mode
 
@@ -189,24 +192,28 @@ pub fn get_two_trench_zones(scene: &Scene, perimeters: &BTreeSet<usize>, anchor_
 
 // From embroidery configuration mode to stitch display mode
 
-#[derive(EnumAsInner, Clone, Copy, Eq, PartialEq)]
+#[derive(EnumAsInner, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 pub enum StitchKind { Normal, NormalBorder, HoppingInDescend, HoppingToTurnBack, HoppingStartOfJob, TransLevel }
 
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct Stitch {
     pub end: Vec2,
     pub kind: StitchKind,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct StitchPath {
     pub start: Vec2,
     pub stitches: Vec<Stitch>,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct StitchColorGroup {
     pub color: UsedColor,
     pub paths: Vec<StitchPath>
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct EmbroideryImage {
     pub grp: Vec<StitchColorGroup>
 }
@@ -233,7 +240,7 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
             neighbours: [Vec::new(), Vec::new()], visited: false} })
     }).collect();
 
-    for y_top in 1..(graph.len() - 1) {
+    for y_top in 1..stitching_trenches.lines.len() {
         let y_bottom = y_top - 1;
         struct SomeonesPoint {
             x: f32,
@@ -247,7 +254,7 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
                 [SomeonesPoint{x: seg.start, is_top, id_on_trench}, SomeonesPoint{x: seg.end, is_top, id_on_trench }].into_iter()
             })
         }).collect();
-        com.sort_by(|a, b| {a.x.partial_cmp(&a.x).unwrap()});
+        com.sort_by(|a, b| {a.x.partial_cmp(&b.x).unwrap()});
         let mut opened_bottom: Option<usize> = None;
         let mut opened_top: Option<usize> = None;
         for sp in com {
@@ -328,6 +335,7 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
     }
 
     impl St {
+        // I really mean 'to scene'
         fn to_screen(&self, x: f32, y: f32) -> Vec2 {
         self.b + self.a * vec2(x, y)
     }
@@ -469,7 +477,12 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
             // Start hopping path on top of these fucks. Maybe, just maybe, we never ended our previous shit
             if dri == 0 && after_parent.is_empty() {
                 // In that case we continue the shitting
-                st.in_progress_hopping.as_mut().unwrap().vertices.push(v);
+                if st.in_progress_hopping.is_none(){
+                    assert!(parent.is_none());
+                    st.start_hopping_chain(&graph[u], y_dir);
+                } else {
+                    st.in_progress_hopping.as_mut().unwrap().vertices.push(v);
+                }
             } else {
                 st.start_hopping_chain(&graph[u], y_dir);
             }
@@ -500,9 +513,6 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
 
     let start_v = match suggested_start {
         None => {
-            // This will be 100% ignored
-            st.in_progress_hopping = Some(HoppingChain{y_dir: YDir::Up, vertices: Vec::new(),
-                start_plane_x: (graph[0].start_x + graph[0].end_x) / 2.});
             0
         },
         Some(old_end) => {
@@ -519,7 +529,7 @@ pub fn fill_trench_zone(stitching_trenches: &TrenchZone, hopping_stitch_len: f32
             closest_vert_id
         }
     };
-    dfs(start_v, None,YDir::Up, StitchDir::Right, &mut graph, &mut st);
+    dfs(start_v, None, YDir::Up, StitchDir::Right, &mut graph, &mut st);
 
     assert!(st.start.is_some());
     assert!(st.stitches.len() > 0);
@@ -555,8 +565,8 @@ pub fn stitch_path_for_thick_line(line: &ThickLineShape) -> StitchPath {
         let end = (c - b).length() + if line.prolonged_tips && i == line.points.len() - 1 { d } else { 0. };
         while w < end{
             let left = get_to_the_left(b, c, w);
-            points.push(b - left);
-            points.push(b + left);
+            points.push(b + (-b+c).normalize() * w - left);
+            points.push(b + (-b+c).normalize() * w + left);
             w += line.cross_dist;
         }
         w -= (c - b).length();
@@ -581,13 +591,14 @@ pub fn stitch_path_for_area_shapes(scene: &Scene, perimeters: &BTreeSet<usize>, 
         }
     }
 
-    if let Some(path) = &mut res {
-        path.stitches.drain(..(
-            path.stitches.iter().position(|stitch|{
-                stitch.kind != StitchKind::HoppingInDescend
-            } ).unwrap_or(path.stitches.len())
-        ));
-    }
+    // todo: something is fishy about it
+    // if let Some(path) = &mut res {
+    //     let i = path.stitches.iter().position(|stitch|{stitch.kind != StitchKind::HoppingInDescend}).unwrap();
+    //     path.stitches.drain(..i);
+    //     if i > 0 {
+    //         path.start = path.stitches[i - 1].end;
+    //     }
+    // }
     res
 }
 
@@ -595,6 +606,7 @@ pub fn build_embroidery_image(scene: &Scene) -> EmbroideryImage {
     let mut color_list: Vec<StitchColorGroup> = Vec::new();
     for (&color_id, color) in &scene.colors {
         let mut paths: Vec<StitchPath> = Vec::new();
+        // Lines and Thick Lines (ungrouped shapes)
         for (&obj_id, g_obj) in &scene.objects{
             let (source, trans) = scene.get_source_and_transition_of_object_node(&g_obj.obj);
             if source.color != color_id { continue; }
@@ -615,6 +627,18 @@ pub fn build_embroidery_image(scene: &Scene) -> EmbroideryImage {
                 }
             }
         }
+
+        // Area shapes
+        for (&grp_id, group) in &scene.area_groups {
+            if  scene.get_object_attrs_by_id(*group.perimeters.first().unwrap()).color != color_id {
+                continue;
+            }
+            stitch_path_for_area_shapes(scene, &group.perimeters,
+                    group.control_center_pos,
+                    vec2(group.control_fill_dir_offset.x, -group.control_fill_dir_offset.y), group.f_params)
+                .and_then(|path|{ paths.push(path); None::<()> });
+        }
+
         if !paths.is_empty() {
             color_list.push(StitchColorGroup{color: color.clone(), paths});
         }

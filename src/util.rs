@@ -18,3 +18,5 @@ pub fn format_float(val: f32, precision: i32) -> String {
         format!("{:.0}", rounded)
     }
 }
+
+pub type BoxResult<T> = Result<T, Box<dyn std::error::Error>>;

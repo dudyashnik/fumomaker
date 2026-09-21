@@ -141,12 +141,12 @@ impl Camera {
 
     // Takes screen space coordinates
     pub fn draw_arrow_on_screen(sa: Vec2, sb: Vec2, thickness: f32, color: Color){
-        let back = (-sb + sa).normalize() * 16.;
-        let p1 = sb + get_rot_mat(PI * 0.25) * back;
-        let p2 = sb + get_rot_mat(-PI * 0.25) * back;
+        let l = (-sb + sa).length();
+        let back = (-sb + sa).normalize() * (if l > 32. {16.} else {l / 2.});
+        let p1 = sb + get_rot_mat(PI * 0.12) * back;
+        let p2 = sb + get_rot_mat(-PI * 0.12) * back;
         draw_line(sa.x, sa.y, sb.x, sb.y, thickness, color);
-        draw_line(p1.x, p1.y, sb.x, sb.y, thickness, color);
-        draw_line(p2.x, p2.y, sb.x, sb.y, thickness, color);
+        draw_triangle(p1, p2, sb, color);
     }
 
     // Takes scene space coordinates
