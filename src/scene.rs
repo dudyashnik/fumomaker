@@ -44,6 +44,10 @@ impl MovementNode {
             Some(mov ) => mov.backward(p), None => p
         }
     }
+
+    pub fn invert(opt: Self) -> Self {
+        match opt { MovementNode::SymmetryMovement(sym) => MovementNode::SymmetryMovement(sym) }
+    }
 }
 
 
@@ -77,6 +81,33 @@ pub enum Shape {
     AreaShape(AreaShape),
     LineShape(LineShape),
     ThickLineShape(ThickLineShape),
+}
+
+impl Shape {
+    pub fn get_points(&self) -> &Vec<Vec2> {
+        match self { Shape::AreaShape(a) => &a.points,
+            Shape::ThickLineShape(a) => &a.points,
+            Shape::LineShape(a) => &a.points,
+        }
+    }
+
+    pub fn get_points_mut(&mut self) -> &mut Vec<Vec2> {
+        match self { Shape::AreaShape(a) => &mut a.points,
+            Shape::ThickLineShape(a) => &mut a.points,
+            Shape::LineShape(a) => &mut a.points,
+        }
+    }
+
+    pub fn get_point_path(&self) -> Vec<Vec2>{
+        match self {
+            Shape::AreaShape(area ) => {
+                let mut p = area.points.clone();
+                p.push(*p.first().unwrap()); p
+            },
+            Shape::ThickLineShape(a) => a.points.clone(),
+            Shape::LineShape(a) => a.points.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -125,8 +156,8 @@ pub struct AreaDoubleFillParams {
 
 impl Default for AreaDoubleFillParams {
     fn default() -> Self { AreaDoubleFillParams {
-        primal_fill: AreaFillParams {fill_line_dist: 0.33, stitch_len: 0.8, stitch_phase_offset: 0.5},
-        hidden_fill: AreaFillParams {fill_line_dist: 0.5, stitch_len: 1.6, stitch_phase_offset: 0.33},
+        primal_fill: AreaFillParams {fill_line_dist: 0.35, stitch_len: 0.8, stitch_phase_offset: 0.5},
+        hidden_fill: AreaFillParams {fill_line_dist: 0.45, stitch_len: 1.8, stitch_phase_offset: 0.33},
         hopping_stitch_len: 3.
     } }
 }
@@ -167,6 +198,13 @@ impl Scene {
         self.get_object_attrs(&self.objects[&obj_id].obj)
     }
 
+    pub fn get_source_id_and_transition_of_object_by_id(&self, obj_id: usize) -> (usize, Option<MovementNode>){
+        match &self.objects[&obj_id].obj {
+            ObjectNode::RealObjectNode(_) => (obj_id, None),
+            ObjectNode::GhostObject(ghost) => (ghost.source, Some(self.movements[&ghost.movement]))
+        }
+    }
+
     pub fn get_source_and_transition_of_object_node<'a>(&'a self, obj: &'a ObjectNode) -> (&'a RealObjectAttrs, Option<MovementNode>){
         match obj {
             ObjectNode::RealObjectNode(real) => (&real.att, None),
@@ -177,17 +215,11 @@ impl Scene {
         }
     }
 
-    pub fn get_object_point_path(&self, obj_id: usize) -> Vec<Vec2> {
+    // Transforms them
+    pub fn get_point_path_of_object_by_id(&self, obj_id: usize) -> Vec<Vec2> {
         let obj = &self.objects[&obj_id].obj;
         let (source, trans) = self.get_source_and_transition_of_object_node(obj);
-        (match &source.shape {
-            Shape::AreaShape(area ) => {
-                let mut p = area.points.clone();
-                p.push(*p.first().unwrap()); p
-            },
-            Shape::LineShape(line) => line.points.clone(),
-            Shape::ThickLineShape(line) => line.points.clone(),
-        }).iter().map(|&v|{ MovementNode::option_forward(trans, v) }).collect()
+        source.shape.get_point_path().iter().map(|&v|{ MovementNode::option_forward(trans, v) }).collect()
     }
 }
 

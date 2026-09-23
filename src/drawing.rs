@@ -18,7 +18,7 @@ pub const COLOR_VEC_LIGHT_BLUE: Vec3 = vec3(0.5, 0.6, 1.);
 pub const COLOR_VEC_PURPLE: Vec3 = vec3(0.8, 0., 1.);
 pub const COLOR_VEC_BLUE_2: Vec3 = vec3(0.0, 0.5, 1.);
 
-const DOT_RADIUS: f32 = 6.;
+pub const DOT_RADIUS: f32 = 12.;
 
 pub fn is_ctrl() -> bool {
     is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)
@@ -179,7 +179,7 @@ impl Camera {
 
     pub fn draw_circle_with_perimeter_on_screen(s: Vec2, rad: f32, inner_color: Color, thickness: f32, perimeter_color: Color){
         draw_circle(s.x, s.y, rad, inner_color);
-        draw_circle_lines(s.x, s.y, rad + thickness, thickness, perimeter_color);
+        draw_circle_lines(s.x, s.y, rad, thickness, perimeter_color);
     }
 
     // Takes scene space coordinates
@@ -189,8 +189,8 @@ impl Camera {
 
     pub fn draw_decor_square_on_screen(s: Vec2, rad: f32, inner_color: Color, thickness: f32, perimeter_color: Color){
         draw_rectangle(s.x - rad, s.y - rad, rad * 2., rad * 2., inner_color);
-        draw_rectangle_lines(s.x - rad - thickness, s.y - rad - thickness,
-                             (rad + thickness) * 2., (rad + thickness) * 2., thickness, perimeter_color);
+        draw_rectangle_lines(s.x - rad, s.y - rad,
+                             (rad) * 2., (rad) * 2., thickness, perimeter_color);
     }
 
     // Takes scene space coordinates

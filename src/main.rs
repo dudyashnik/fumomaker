@@ -108,15 +108,21 @@ async fn main() {
         }
 
         if is_pressed_with_ctrl(KeyCode::E){
-            if let Some(img) = &editor.stitches {
-                if let Err(err) = save_embroidery_image_to_file(&embroidery_file_name, img){
-                    last_error_message = err.to_string();
-                }
+            let img = match &editor.stitches {
+                Some(img) => img,
+                None => &build_embroidery_image(&editor.scene)
+            };
+            if let Err(err) = save_embroidery_image_to_file(&embroidery_file_name, img){
+                last_error_message = err.to_string();
             }
         }
 
-        if is_mouse_button_pressed(MouseButton::Left) && is_no_mod_down(){
-            editor.command_embroidery_config_control_click_normal();
+        if is_mouse_button_pressed(MouseButton::Right) && !is_shift() && is_ctrl() && is_alt() {
+            editor.command_click_delete_vertex_of_selected_shape();
+        }
+
+        if is_mouse_button_pressed(MouseButton::Left) && !is_shift() && is_ctrl() && is_alt() {
+            editor.command_click_add_vertex_to_selected_shape();
         }
 
         if is_mouse_button_pressed(MouseButton::Left) && is_no_mod_down() {
@@ -127,8 +133,19 @@ async fn main() {
             editor.command_drawing_mode_click_negative();
         }
 
+        // Requires release event for this mouse button
+        if is_mouse_button_pressed(MouseButton::Left) && !is_shift() && is_ctrl() && !is_alt() {
+            editor.command_click_select_vertex_of_selected_shape_for_moving_vert();
+        }
+
+        // Requires release event for this mouse button
+        if is_mouse_button_pressed(MouseButton::Left) && is_no_mod_down(){
+            editor.command_embroidery_config_control_click_normal();
+        }
+
         if is_mouse_button_released(MouseButton::Left) {
             editor.command_embroidery_config_control_pointer_btn_release();
+            editor.command_moving_vertex_pointer_btn_release();
         }
 
         if is_mouse_button_pressed(MouseButton::Right) && is_no_mod_down(){
@@ -155,8 +172,7 @@ async fn main() {
             editor.command_set_editor_mode_stitch_image_viewing();
         }
         if is_pressed_with_no_mod(KeyCode::Escape) && editor.mode.is_stitch() {
-            editor.stitches = None;
-            editor.mode = EditorMode::Embroidery;
+            editor.command_set_editor_mode_embroidery_config();
         }
         if is_pressed_with_no_mod(KeyCode::Key1){
             editor.command_change_tool_to_area();
@@ -220,6 +236,13 @@ async fn main() {
             editor.command_stitch_image_viewing_progress_forward(100);
         }
 
+        if is_pressed_with_no_mod(KeyCode::T){
+            editor.command_toggle_some_param_of_selected_shape();
+        }
+        if is_pressed_with_no_mod(KeyCode::B){
+            editor.command_remove_last_vertex_of_edited_path();
+        }
+
         editor.command_ack_pointer_motion();
         editor.command_ack_mouse_wheel_motion();
 
@@ -229,11 +252,12 @@ async fn main() {
                                                    is_key_down(KeyCode::S), is_key_down(KeyCode::D));
         }
 
-
-
         if is_quit_requested(){
-            // todo: save
+            if let Err(err) = save_scene_to_file(&scene_file_name, &editor.scene) {
+                println!("{}", err.to_string());
+            }
             break;
+
         }
         next_frame().await;
         t_previous = t_now;

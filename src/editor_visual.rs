@@ -59,9 +59,7 @@ pub struct Editor {
     pub selected_shape_for_attaching_to_group: Option<usize>,
     pub selected_shape_for_moving: Option<usize>,
     pub selected_movement_for_movement: Option<usize>,
-    pub selected_point: Option<usize>,
-    pub selected_point_my_start: Vec2,
-    pub selected_point_origin_start: Vec2,
+    pub held_moving_selected_point: Option<usize>,
     pub unsaved: bool,
     pub held_arrow_start_embroidery_control_group: Option<usize>,
     pub held_arrow_end_embroidery_control_group: Option<usize>,
@@ -86,9 +84,7 @@ impl Editor {
             selected_shape_for_attaching_to_group: None,
             selected_shape_for_moving: None,
             selected_movement_for_movement: None,
-            selected_point: None,
-            selected_point_my_start: Vec2::default(),
-            selected_point_origin_start: Vec2::default(),
+            held_moving_selected_point: None,
             unsaved: false,
             held_arrow_start_embroidery_control_group: None,
             held_arrow_end_embroidery_control_group: None,
@@ -105,6 +101,11 @@ impl Editor {
             g.paths.iter().map(|path|->usize {path.stitches.len()}).sum::<usize>()
                 + g.paths.len()
         }).sum()
+    }
+
+    pub fn get_held_edited_object(&self) -> Option<usize> {
+        self.held_edited_perimeter.or_else(||{self.held_edited_thin_line})
+            .or_else(||{self.held_edited_thick_line})
     }
 
     pub fn draw_grid(&self, font: &Font) {
@@ -192,6 +193,14 @@ impl Editor {
             }
         }
 
+        let draw_vertices = |points: &[Vec2], color: Color, id: usize| {
+            if self.selected == Selection::Object(id) {
+                for &p in points {
+                    Camera::draw_circle_with_perimeter_on_screen(p, 5., WHITE, 3., color);
+                }
+            }
+        };
+
         for (&id, g_object) in &scene.objects {
             let (source, trans) = scene.get_source_and_transition_of_object_node(&g_object.obj);
             let color = vec3_to_mq_color(scene.colors[&source.color].clr);
@@ -225,6 +234,7 @@ impl Editor {
             } else if self.selected_shape_for_moving == Some(id) {
                 Camera::draw_dashed_path_on_screen(&points, 5. * t, thickness + 2., 20., 40., vec3_to_mq_color(COLOR_VEC_BLUE));
             }
+            draw_vertices(&points, color, id);
         }
         for (&gid, group) in &scene.area_groups {
             let color = scene.colors[&scene.get_object_attrs_by_id(*group.perimeters.first().unwrap()).color].clr;
@@ -237,10 +247,10 @@ impl Editor {
                     let points: Vec<Vec2> = source.points.iter().map(|scr|{self.cam.scene_coord_to_screen(MovementNode::option_forward(trans, *scr))}).collect();
                     if source.is_gap {
                         Camera::draw_dashed_contour_on_screen(&points, 1. * t, 4., 28., 30.,
-                                                              vec3_to_mq_color(color), self.held_edited_perimeter != Some(area_id));
+                              vec3_to_mq_color(color), self.held_edited_perimeter != Some(area_id));
                     } else {
                         Camera::draw_contour_on_screen(&points, 4., vec3_to_mq_color(color),
-                                                       self.held_edited_perimeter != Some(area_id));
+                               self.held_edited_perimeter != Some(area_id));
                     }
                     if self.selected == Selection::Object(area_id){
                         Camera::draw_dashed_contour_on_screen(&points, 5. * t, 6., 20., 40., vec3_to_mq_color(COLOR_VEC_ORANGE), true);
@@ -249,6 +259,7 @@ impl Editor {
                     } else if self.selected_shape_for_moving == Some(area_id) {
                         Camera::draw_dashed_contour_on_screen(&points, 5. * t, 6., 20., 40., vec3_to_mq_color(COLOR_VEC_BLUE), true);
                     }
+                    draw_vertices(&points, vec3_to_mq_color(color), area_id);
                 }
             } else if self.mode.is_embroidery() {
                 let (hidden, primary) = get_two_trench_zones(
@@ -266,8 +277,8 @@ impl Editor {
                 let dir_arrow_color = vec3_to_mq_color(vec3(0.3, 0., 0.));
                 let (arr_a, arr_b) = self.get_area_group_control_arrow_scr_pos(group);
                 Camera::draw_arrow_on_screen(arr_a, arr_b, 4., dir_arrow_color);
-                Camera::draw_decor_square_on_screen(arr_a, 3., WHITE, 3., dir_arrow_color);
-                Camera::draw_circle_with_perimeter_on_screen(arr_b, 4., BLANK, 2., dir_arrow_color);
+                Camera::draw_decor_square_on_screen(arr_a, 5., WHITE, 3., dir_arrow_color);
+                Camera::draw_circle_with_perimeter_on_screen(arr_b, 5., BLANK, 2., dir_arrow_color);
             }
         }
     }
