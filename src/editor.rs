@@ -49,13 +49,13 @@ impl Editor {
     }
 
     pub fn delete_the_object(&mut self, id: usize, delete_original: bool){
-        match &self.scene.objects[&id].obj {
-            ObjectNode::RealObjectNode(obj) => {
+        match &self.scene.objects[&id].obj.obj {
+            ObjectNodeBase::RealObjectNode(obj) => {
                 if let Some(clone_id) = obj.clone {
                     self.delete_the_object_without_consequences(clone_id);
                 }
             },
-            ObjectNode::GhostObject(ghost) => {
+            ObjectNodeBase::GhostObject(ghost) => {
                 if delete_original {
                     self.delete_the_object_without_consequences(ghost.source);
                 }
@@ -67,7 +67,10 @@ impl Editor {
     // Too bad we did not think of backward mapping
     fn get_ghosts_of_movement(&self, movement_id: usize) -> Vec<usize>{
         self.scene.objects.iter().filter_map(|(&id, node)|{
-            if node.obj.is_ghost_object() { Some(id) } else {None}
+            match &node.obj.obj {
+                ObjectNodeBase::GhostObject(gh) => if gh.movement == movement_id { Some(id) } else { None },
+                ObjectNodeBase::RealObjectNode(_) => None
+            }
         }).collect()
     }
 
@@ -92,7 +95,7 @@ impl Editor {
 
     pub fn get_points_mut_of_real_object(&mut self, id: usize) -> &mut Vec<Vec2>{
         match &mut self.scene.objects.get_mut(&id).unwrap()
-            .obj.as_real_object_node_mut().unwrap().att.shape{
+            .obj.obj.as_real_object_node_mut().unwrap().att.shape{
             Shape::AreaShape(shape) => &mut shape.points,
             Shape::ThickLineShape(shape) => &mut shape.points,
             Shape::LineShape(shape) => &mut shape.points,
@@ -167,12 +170,14 @@ impl Editor {
                         perimeters: BTreeSet::from([id])
                     });
                     self.scene.objects.insert(id, GroupedObjectNode{
-                        obj: ObjectNode::RealObjectNode(RealObjectNode{
-                            att: RealObjectAttrs{ shape: Shape::AreaShape(AreaShape {
-                                points: vec![p, p], is_gap
-                            }), color: working_color_id },
-                            clone: None
-                        }), group: Some(new_group_id)});
+                        obj: ColoredObjectNode {
+                            obj: ObjectNodeBase::RealObjectNode(RealObjectNode{
+                                att: RealObjectAttrs{ shape: Shape::AreaShape(AreaShape {
+                                    points: vec![p, p], is_gap
+                                })},
+                                clone: None }),
+                            color: working_color_id },
+                        group: Some(new_group_id)});
                     self.held_edited_perimeter = Some(id);
                 }
             }
@@ -183,12 +188,17 @@ impl Editor {
                 } else {
                     let working_color_id = match self.selected_color { Some(x) => x, None => return };
                     let id = btreemap_usize_get_unused_id(&self.scene.objects);
-                    self.scene.objects.insert(id, GroupedObjectNode {group: None,
-                        obj: ObjectNode::RealObjectNode(RealObjectNode {clone: None,
-                            att: RealObjectAttrs {
-                                shape: Shape::LineShape(LineShape{points: vec![p, p]}),
-                                color: working_color_id }
-                        })});
+                    self.scene.objects.insert(id, GroupedObjectNode {
+                        obj: ColoredObjectNode {
+                            obj: ObjectNodeBase::RealObjectNode(RealObjectNode {clone: None,
+                                att: RealObjectAttrs {
+                                    shape: Shape::LineShape(LineShape{points: vec![p, p]}),
+                                }
+                            }),
+                            color: working_color_id
+                        },
+                        group: None,
+                    });
                     self.held_edited_thin_line = Some(id);
                 }
             }
@@ -199,15 +209,20 @@ impl Editor {
                 } else {
                     let working_color_id = match self.selected_color { Some(x) => x, None => return };
                     let id = btreemap_usize_get_unused_id(&self.scene.objects);
-                    self.scene.objects.insert(id, GroupedObjectNode {group: None,
-                        obj: ObjectNode::RealObjectNode(RealObjectNode {clone: None,
-                            att: RealObjectAttrs {
-                                shape: Shape::ThickLineShape(ThickLineShape{
-                                    thickness: 2., points: vec![p, p], prolonged_tips: false,
-                                    cross_dist: 0.33
-                                }),
-                                color: working_color_id }
-                        })});
+                    self.scene.objects.insert(id, GroupedObjectNode {
+                        obj: ColoredObjectNode {
+                            obj: ObjectNodeBase::RealObjectNode(RealObjectNode {clone: None,
+                                att: RealObjectAttrs {
+                                    shape: Shape::ThickLineShape(ThickLineShape{
+                                        thickness: 2., points: vec![p, p], prolonged_tips: false,
+                                        cross_dist: 0.33
+                                    }),
+                                }
+                            }),
+                            color: working_color_id
+                        },
+                        group: None,
+                    });
                     self.held_edited_thick_line = Some(id);
                 }
             }
@@ -294,8 +309,8 @@ impl Editor {
     pub fn command_cancellation(&mut self){
         if let Some(id) = self.held_edited_sym {
             self.delete_movement(id);
-        } else if let Some(area_id) = self.held_edited_perimeter {
-            self.delete_the_object(area_id, false);
+        } else if let Some(id) = self.held_edited_perimeter {
+            self.delete_the_object(id, false);
         } else if let Some(id) = self.held_edited_thin_line {
             self.delete_the_object(id, false);
         } else if let Some(id) = self.held_edited_thick_line {
@@ -330,8 +345,8 @@ impl Editor {
             (Some(par_id), Selection::Object(obj_id)) => {
                 let me = &self.scene.objects[&obj_id];
                 let my_attrs = self.scene.get_object_attrs(&me.obj);
-                let par_attrs = self.scene.get_object_attrs_by_id(par_id);
-                if my_attrs.shape.is_area_shape() &&par_attrs.color == my_attrs.color {
+                let par_color_id = self.scene.objects[&par_id].obj.color;
+                if my_attrs.shape.is_area_shape() && par_color_id == me.obj.color {
                     let old_group = me.group.unwrap();
                     let new_group = self.scene.objects[&par_id].group.unwrap();
                     if old_group != new_group {
@@ -467,11 +482,15 @@ impl Editor {
         if !self.mode.is_draw() { return; }
         match (self.selected_movement_for_movement, self.selected_shape_for_moving) {
             (Some(mov_id), Some(source_obj_id)) => {
-                if let ObjectNode::RealObjectNode(node) = &self.scene.objects.get(&source_obj_id).unwrap().obj {
+                let source_obj: &ColoredObjectNode = &self.scene.objects[&source_obj_id].obj;
+                if let ObjectNodeBase::RealObjectNode(node) = &source_obj.obj {
                     if node.clone.is_none(){
                         let clone_id = btreemap_usize_get_unused_id(&self.scene.objects);
                         self.scene.objects.insert(clone_id, GroupedObjectNode{
-                            group: None, obj: ObjectNode::GhostObject(GhostObject{ movement: mov_id, source: source_obj_id})});
+                            group: None, obj: ColoredObjectNode{
+                                obj: ObjectNodeBase::GhostObject(GhostObject{ movement: mov_id, source: source_obj_id }),
+                                color: match self.selected_color { None => source_obj.color, Some(color_id) => color_id}
+                            }, });
                         if self.scene.get_object_attrs_by_id(source_obj_id).shape.is_area_shape(){
                             let new_group_id = btreemap_usize_get_unused_id(&self.scene.area_groups);
                             self.scene.area_groups.insert(new_group_id, AreaShapeGroup{
@@ -528,12 +547,12 @@ impl Editor {
 
     pub fn command_toggle_some_param_of_selected_shape(&mut self){
         if let Selection::Object(obj_id) = self.selected {
-            let orig: &mut RealObjectAttrs = match &mut self.scene.objects.get_mut(&obj_id).unwrap().obj {
-                ObjectNode::RealObjectNode(real) => { &mut real.att },
-                ObjectNode::GhostObject(ghost) => {
+            let orig: &mut RealObjectAttrs = match &mut self.scene.objects.get_mut(&obj_id).unwrap().obj.obj {
+                ObjectNodeBase::RealObjectNode(real) => { &mut real.att },
+                ObjectNodeBase::GhostObject(ghost) => {
                     let id = ghost.source;
                     &mut self.scene.objects.get_mut(&id).unwrap()
-                        .obj.as_real_object_node_mut().unwrap().att
+                        .obj.obj.as_real_object_node_mut().unwrap().att
                 },
             };
             match &mut orig.shape {
@@ -549,7 +568,7 @@ impl Editor {
             let (source_id, trans) = self.scene
                 .get_source_id_and_transition_of_object_by_id(obj_id);
             if let Some(deleted_vertex) = 'search: {
-                for (pn, point) in self.scene.objects[&source_id].obj.as_real_object_node().unwrap()
+                for (pn, point) in self.scene.objects[&source_id].obj.obj.as_real_object_node().unwrap()
                     .att.shape.get_points().iter()
                     .map(|&ps|{MovementNode::option_forward(trans, ps)}).enumerate()
                 {
@@ -621,6 +640,15 @@ impl Editor {
             } else {
                 points.pop();
             }
+        }
+    }
+
+    pub fn command_recolor_selected_object(&mut self){
+        match (self.selected, self.selected_color) {
+            (Selection::Object(obj_id), Some(color_id)) => {
+                self.scene.objects.get_mut(&obj_id).unwrap().obj.color = color_id
+            }
+            _ => {}
         }
     }
 }

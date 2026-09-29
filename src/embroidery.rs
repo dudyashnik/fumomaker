@@ -446,7 +446,7 @@ pub fn build_embroidery_image(scene: &Scene) -> EmbroideryImage {
         // Lines and Thick Lines (ungrouped shapes)
         for (&obj_id, g_obj) in &scene.objects{
             let (source, trans) = scene.get_source_and_transition_of_object_node(&g_obj.obj);
-            if source.color != color_id { continue; }
+            if g_obj.obj.color != color_id { continue; }
             match &source.shape {
                 Shape::AreaShape(_) => continue,
                 Shape::LineShape(line) => {
@@ -467,7 +467,7 @@ pub fn build_embroidery_image(scene: &Scene) -> EmbroideryImage {
 
         // Area shapes
         for (&grp_id, group) in &scene.area_groups {
-            if  scene.get_object_attrs_by_id(*group.perimeters.first().unwrap()).color != color_id {
+            if  scene.objects[group.perimeters.first().unwrap()].obj.color != color_id {
                 continue;
             }
             stitch_path_for_area_shapes(scene, &group.perimeters,

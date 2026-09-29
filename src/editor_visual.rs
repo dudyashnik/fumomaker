@@ -203,7 +203,7 @@ impl Editor {
 
         for (&id, g_object) in &scene.objects {
             let (source, trans) = scene.get_source_and_transition_of_object_node(&g_object.obj);
-            let color = vec3_to_mq_color(scene.colors[&source.color].clr);
+            let color = vec3_to_mq_color(scene.colors[&g_object.obj.color].clr);
             let (scene_points, thickness) = match &source.shape {
                 Shape::AreaShape(_) => { continue }
                 Shape::LineShape(line) => {
@@ -237,9 +237,9 @@ impl Editor {
             draw_vertices(&points, color, id);
         }
         for (&gid, group) in &scene.area_groups {
-            let color = scene.colors[&scene.get_object_attrs_by_id(*group.perimeters.first().unwrap()).color].clr;
+            let color = scene.colors[&scene.objects[group.perimeters.first().unwrap()].obj.color].clr;
             if self.mode.is_draw() {
-                for (area_id, obj) in group.perimeters.iter().map(|&id| -> (usize, &ObjectNode) { (id, &scene.objects[&id].obj) }) {
+                for (area_id, obj) in group.perimeters.iter().map(|&id| -> (usize, &ColoredObjectNode) { (id, &scene.objects[&id].obj) }) {
                     let (source, trans): (&AreaShape, Option<MovementNode>) = {
                         let (source_attrs, trans) = scene.get_source_and_transition_of_object_node(obj);
                         (source_attrs.shape.as_area_shape().unwrap(), trans)
@@ -410,16 +410,16 @@ impl Editor {
                 Shape::LineShape(_) => "Thin path",
                 Shape::ThickLineShape(_) => "Thick path",
                 Shape::AreaShape(_) => "Closed area"
-            }, my_id, match &obj.obj {
-                ObjectNode::RealObjectNode(_) => "".to_string(),
-                ObjectNode::GhostObject(gh) => format!(", ghost of #{} through #{}", gh.source, gh.movement),
+            }, my_id, match &obj.obj.obj {
+                ObjectNodeBase::RealObjectNode(_) => "".to_string(),
+                ObjectNodeBase::GhostObject(gh) => format!(", ghost of #{} through #{}", gh.source, gh.movement),
             })
         };
         for (&id, obj) in &scene.objects {
             if let Shape::AreaShape(_) = scene.get_object_attrs(&obj.obj).shape {
                 continue;
             }
-            let color = scene.colors[&scene.get_object_attrs(&obj.obj).color].clr;
+            let color = scene.colors[&obj.obj.color].clr;
             let border_color = if self.selected == Selection::Object(id){
                 COLOR_VEC_ORANGE
             } else if self.selected_shape_for_moving == Some(id) {
@@ -436,7 +436,7 @@ impl Editor {
                 } else { false }
             };
 
-            let group_color_id = scene.get_object_attrs(&scene.objects[group.perimeters.first().unwrap()].obj).color;
+            let group_color_id = &scene.objects[group.perimeters.first().unwrap()].obj.color;
             let group_color = scene.colors[&group_color_id].clr;
             entries.push(EntryInSideList{
                 border_color: if group_is_selected_for_attaching_to_us { COLOR_VEC_BLUE_2 } else { COLOR_VEC_BLACK },

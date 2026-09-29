@@ -113,7 +113,6 @@ impl Shape {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RealObjectAttrs {
     pub shape: Shape,
-    pub color: usize,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -129,14 +128,20 @@ pub struct GhostObject {
 }
 
 #[derive(Clone, EnumAsInner, Serialize, Deserialize)]
-pub enum ObjectNode {
+pub enum ObjectNodeBase {
     RealObjectNode(RealObjectNode),
     GhostObject(GhostObject),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+pub struct ColoredObjectNode {
+    pub obj: ObjectNodeBase,
+    pub color: usize,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct GroupedObjectNode {
-    pub obj: ObjectNode,
+    pub obj: ColoredObjectNode,
     pub group: Option<usize>,
 }
 
@@ -187,10 +192,10 @@ impl Default for Scene {
 }
 
 impl Scene {
-    pub fn get_object_attrs<'a>(&'a self, obj: &'a ObjectNode) -> &'a RealObjectAttrs {
-        match obj {
-            ObjectNode::RealObjectNode(ron) => &ron.att,
-            ObjectNode::GhostObject(gon) => &self.objects[&gon.source].obj.as_real_object_node().unwrap().att
+    pub fn get_object_attrs<'a>(&'a self, obj: &'a ColoredObjectNode) -> &'a RealObjectAttrs {
+        match &obj.obj {
+            ObjectNodeBase::RealObjectNode(ron) => &ron.att,
+            ObjectNodeBase::GhostObject(gon) => &self.objects[&gon.source].obj.obj.as_real_object_node().unwrap().att
         }
     }
 
@@ -199,17 +204,17 @@ impl Scene {
     }
 
     pub fn get_source_id_and_transition_of_object_by_id(&self, obj_id: usize) -> (usize, Option<MovementNode>){
-        match &self.objects[&obj_id].obj {
-            ObjectNode::RealObjectNode(_) => (obj_id, None),
-            ObjectNode::GhostObject(ghost) => (ghost.source, Some(self.movements[&ghost.movement]))
+        match &self.objects[&obj_id].obj.obj {
+            ObjectNodeBase::RealObjectNode(_) => (obj_id, None),
+            ObjectNodeBase::GhostObject(ghost) => (ghost.source, Some(self.movements[&ghost.movement]))
         }
     }
 
-    pub fn get_source_and_transition_of_object_node<'a>(&'a self, obj: &'a ObjectNode) -> (&'a RealObjectAttrs, Option<MovementNode>){
-        match obj {
-            ObjectNode::RealObjectNode(real) => (&real.att, None),
-            ObjectNode::GhostObject(ghost) => (
-                &self.objects[&ghost.source].obj.as_real_object_node().unwrap().att,
+    pub fn get_source_and_transition_of_object_node<'a>(&'a self, obj: &'a ColoredObjectNode) -> (&'a RealObjectAttrs, Option<MovementNode>){
+        match &obj.obj {
+            ObjectNodeBase::RealObjectNode(real) => (&real.att, None),
+            ObjectNodeBase::GhostObject(ghost) => (
+                &self.objects[&ghost.source].obj.obj.as_real_object_node().unwrap().att,
                 Some(self.movements[&ghost.movement])
             )
         }

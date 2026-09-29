@@ -77,6 +77,8 @@ Controlling shown stitch progress position:
 
 `B` remove last vertex of currently edited shape
 
+`Alt+C` recolor selected shape (to selected color)
+
 `W,A,S,D` moving camera
 
 Wheel up/down zooms the camera.

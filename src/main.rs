@@ -53,6 +53,8 @@ const COOL_COLORS: &[CoolColor] = &[
     CoolColor{clr: Vec3::new(0.0, 0.0, 0.0), name: "black"},
     CoolColor{clr: Vec3::new(0.3, 0.3, 0.3), name: "gray"},
     CoolColor{clr: Vec3::new(0.7, 0.7, 0.7), name: "light gray"},
+    CoolColor{clr: Vec3::new(1., 0.753, 0.796), name: "pink"},
+    CoolColor{clr: Vec3::new(1., 1., 0.), name: "yellow"},
 ];
 
 
@@ -65,7 +67,6 @@ impl From<&CoolColor> for UsedColor {
 
 #[macroquad::main("Texture")]
 async fn main() {
-    println!("1123123123");
     let args: Vec<String> = args().collect();
     if args.len() != 2 {
         println!("Usage: fumomaker <scene_file.fm_scene>");
@@ -241,6 +242,9 @@ async fn main() {
         }
         if is_pressed_with_no_mod(KeyCode::B){
             editor.command_remove_last_vertex_of_edited_path();
+        }
+        if is_pressed_with_alt(KeyCode::C) {
+            editor.command_recolor_selected_object();
         }
 
         editor.command_ack_pointer_motion();
