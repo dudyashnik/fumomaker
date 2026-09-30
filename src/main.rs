@@ -101,6 +101,7 @@ async fn main() {
         editor.draw_info_label(&font, &embroidery_file_name, &last_error_message);
         editor.draw_color_list(&font);
         editor.draw_node_list(&font);
+        editor.draw_full_info_text(&font);
 
         if is_pressed_with_ctrl(KeyCode::S) {
             if let Err(err) = save_scene_to_file(&scene_file_name, &editor.scene) {
@@ -249,6 +250,14 @@ async fn main() {
 
         editor.command_ack_pointer_motion();
         editor.command_ack_mouse_wheel_motion();
+
+        if mouse_wheel().1 > 0. && is_ctrl() && !is_shift() && !is_alt() {
+            editor.command_increase_gap_primal_trench_gap_of_area_shape();
+        }
+
+        if mouse_wheel().1 < 0. && is_ctrl() && !is_shift() && !is_alt() {
+            editor.command_decrease_gap_primal_trench_gap_of_area_shape();
+        }
 
         if is_no_mod_down(){
             editor.command_ack_pressed_motion_keys(t_previous, t_now,

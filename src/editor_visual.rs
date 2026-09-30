@@ -329,8 +329,10 @@ impl Editor {
                 EditorDrawingTool::ThickLine => "Thick path drawing tool",
             }),
             EditorMode::Embroidery => format!("Configuring embroidery"),
-            EditorMode::Stitch => format!("Embroidery finished. Will export to {}{}",
+            EditorMode::Stitch => format!("Embroidery finished. Will export to {}. Shown {}/{} stitches{}",
                                           embroidery_file_name,
+                                            self.shown_stitches,
+                                            self.get_total_stitch_number_in_shown_image(),
                                           if error.is_empty() { "".to_string() } else { format!(". {error}") }),
         };
         let info_text = format!("{}{}", if self.unsaved { "*Unsaved* " } else { "" }, editor_status);
@@ -456,5 +458,37 @@ impl Editor {
             }
         }
         self.draw_list_of_nodes(&entries, font);
+    }
+
+    pub fn draw_full_info_text(&self, font: &Font) {
+        let info_text = match self.selected {
+            Selection::Object(id) => {
+                let obj = self.scene.objects.get(&id).unwrap();
+                let a = match & obj.obj.obj { ObjectNodeBase::RealObjectNode(_) => "Real".to_string(), ObjectNodeBase::GhostObject(_) => "Ghost".to_string() };
+                let b = if let Some(group_id) = obj.group {
+                    let params: AreaDoubleFillParams = self.scene.area_groups[&group_id].f_params;
+                    let par_to_str = |p: AreaFillParams| -> String {
+                        format!("      fill_line_dist = {:.2}\n      stitch_len = {:.2}\n      stitch_phase_offset = {:.2}\n",
+                                p.fill_line_dist, p.stitch_len, p.stitch_phase_offset, )
+                    };
+                    format!("\nIn group #{}primal_fill:\n{}hidden_fill:\n{}hopping_stitch_len = {:.2}",
+                            group_id,
+                            par_to_str(params.primal_fill), par_to_str(params.hidden_fill), params.hopping_stitch_len)
+                } else { "".to_string() };
+                format!("{}{}", a, b)
+            }
+            _ => "".to_string()
+        };
+
+        let font_size = 28;
+        let line_distance_f = 1.15;
+        let dim = measure_multiline_text(&info_text, Some(font), font_size, 1f32, Some(line_distance_f));
+        let right_padding = 7.0;
+        let bottom_padding = 6.0;
+        // draw_rectangle_with_borders((screen_width() - dim.width) / 2f32 - margin, top_padding, dim.width + margin * 2.0, dim.height + margin * 2.0, LIGHTGRAY, WHITE);
+        draw_multiline_text_ex(&info_text, screen_width() - right_padding - dim.width,
+                     screen_height() - bottom_padding - dim.height, Some(line_distance_f),
+                     TextParams {color: BLACK, font: Some(&font), font_size, font_scale: 1f32, ..Default::default()});
+
     }
 }

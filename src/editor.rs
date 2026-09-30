@@ -27,11 +27,7 @@ impl Editor {
     fn delete_the_object_without_consequences(&mut self, id: usize){
         let sh = self.scene.objects.remove(&id).unwrap();
         if let Some(group_id) = sh.group {
-            let group = self.scene.area_groups.get_mut(&group_id).unwrap();
-            group.perimeters.remove(&id);
-            if group.perimeters.is_empty(){
-                self.scene.area_groups.remove(&group_id);
-            }
+            self.remove_object_from_its_group(id, group_id);
         }
         let wash_option = |r: &mut Option<usize>|{
             if let Some(their_id) = r && *their_id == id {
@@ -190,10 +186,11 @@ impl Editor {
                     let id = btreemap_usize_get_unused_id(&self.scene.objects);
                     self.scene.objects.insert(id, GroupedObjectNode {
                         obj: ColoredObjectNode {
-                            obj: ObjectNodeBase::RealObjectNode(RealObjectNode {clone: None,
+                            obj: ObjectNodeBase::RealObjectNode(RealObjectNode {
                                 att: RealObjectAttrs {
                                     shape: Shape::LineShape(LineShape{points: vec![p, p]}),
-                                }
+                                },
+                                clone: None,
                             }),
                             color: working_color_id
                         },
@@ -211,13 +208,14 @@ impl Editor {
                     let id = btreemap_usize_get_unused_id(&self.scene.objects);
                     self.scene.objects.insert(id, GroupedObjectNode {
                         obj: ColoredObjectNode {
-                            obj: ObjectNodeBase::RealObjectNode(RealObjectNode {clone: None,
+                            obj: ObjectNodeBase::RealObjectNode(RealObjectNode {
                                 att: RealObjectAttrs {
                                     shape: Shape::ThickLineShape(ThickLineShape{
                                         thickness: 2., points: vec![p, p], prolonged_tips: false,
                                         cross_dist: 0.33
                                     }),
-                                }
+                                },
+                                clone: None,
                             }),
                             color: working_color_id
                         },
@@ -420,12 +418,30 @@ impl Editor {
     }
 
     pub fn command_ack_mouse_wheel_motion(&mut self){
-        if mouse_wheel().1 != 0. {
+        if mouse_wheel().1 != 0. && is_no_mod_down() {
             let s = 1.15f32.powf(mouse_wheel().1);
             let pointing = self.cam.screen_coord_to_scene(get_mouse_position_vec2());
             self.cam.top_left = pointing + (-pointing + self.cam.top_left) / s;
             self.cam.px_in_mm = self.cam.px_in_mm * s;
         }
+    }
+
+    fn change_gap_of_area_shape(&mut self, ch: f32){
+        if !self.mode.is_embroidery() && !self.mode.is_draw() { return; }
+        if let Selection::Object(sel_obj_id) = self.selected {
+            if let Some(group_id) = self.scene.objects.get(&sel_obj_id).unwrap().group {
+                let params: &mut AreaDoubleFillParams = &mut self.scene.area_groups.get_mut(&group_id).unwrap().f_params;
+                params.primal_fill.fill_line_dist = f32::clamp(params.primal_fill.fill_line_dist + ch * 0.01, 0.1, 0.8);
+            }
+        }
+    }
+
+    pub fn command_increase_gap_primal_trench_gap_of_area_shape(&mut self) {
+        self.change_gap_of_area_shape(1.);
+    }
+
+    pub fn command_decrease_gap_primal_trench_gap_of_area_shape(&mut self) {
+        self.change_gap_of_area_shape(-1.);
     }
 
     pub fn command_ack_pressed_motion_keys(&mut self, t_previous: Instant, t_now: Instant, up_pressed: bool, left_pressed: bool, down_pressed: bool, right_pressed: bool){
@@ -500,6 +516,7 @@ impl Editor {
                             });
                             self.scene.objects.get_mut(&clone_id).unwrap().group = Some(new_group_id);
                         }
+                        self.scene.objects.get_mut(&source_obj_id).unwrap().obj.obj.as_real_object_node_mut().unwrap().clone = Some(clone_id);
                     }
                 }
             },
